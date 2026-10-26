@@ -8,7 +8,7 @@ import {existsSync, readFileSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {delimiter, join} from 'node:path';
 import {z} from 'zod';
-import * as codetools from '../ds/codetools.js';
+import {CODE_SERVER, codeTools} from '../code/tools.js';
 import {Canon, Skills} from '../ds/kb.js';
 import {type DsTool, runTool, systemPrompt as dsPrompt, tools as dsTools} from '../ds/tools.js';
 import * as spec from '../spec.js';
@@ -72,14 +72,14 @@ export interface AgentSession {
 
 export class AgentUnavailable extends Error {}
 
-/** The terminal's own tools, served in-process as the `ds` MCP server: ds-next's tools (src/ds/tools.ts)
- *  and rule_spec. Reading never asks. */
+/** The terminal's own tools, served in process as two MCP servers: `ds`, ds-next's tools (src/ds/tools.ts)
+ *  and rule_spec; and `code`, the language servers' answers (src/code/tools.ts). Reading never asks. */
 export const SERVER = 'ds';
 export const READ_ONLY = new Set([`mcp__${SERVER}__rule_spec`]);
 
-/** Every tool id that never asks: rule_spec, ds-next's read-only tools, the graph's and the LSP's reads. */
-export function readOnlyIds(tools: DsTool[], servers: Record<string, unknown>): Set<string> {
-	return new Set([...READ_ONLY, ...tools.filter(t => t.readOnly).map(t => `mcp__${SERVER}__${t.name}`), ...codetools.readOnlyIds(servers)]);
+/** Every tool id that never asks: rule_spec, ds-next's read-only tools, and every code tool. */
+export function readOnlyIds(tools: DsTool[], code: DsTool[] = []): Set<string> {
+	return new Set([...READ_ONLY, ...tools.filter(t => t.readOnly).map(t => `mcp__${SERVER}__${t.name}`), ...code.map(t => `mcp__${CODE_SERVER}__${t.name}`)]);
 }
 
 const SECTIONS = ['summary', 'principles', 'colour', 'glyphs', 'grid', 'motion', 'mascot', 'codeMap', 'screens', 'knownGaps'] as const;
@@ -185,12 +185,12 @@ export const ruleSpecTool: DsTool = {
 	},
 };
 
-/** The `ds` MCP server, built with the loaded SDK's own helpers: the tools given, and rule_spec. */
-export function dsServer(sdk: Sdk, tools: DsTool[] = []): unknown {
+/** An in-process MCP server, built with the loaded SDK's own helpers, serving the tools given. */
+export function inProcessServer(sdk: Sdk, name: string, tools: DsTool[]): unknown {
 	return sdk.createSdkMcpServer({
-		name: SERVER,
+		name,
 		version: '0.1.0',
-		tools: [...tools, ruleSpecTool].map(t =>
+		tools: tools.map(t =>
 			sdk.tool(t.name, t.description, t.shape, async (args: Record<string, unknown>) => {
 				const r = await runTool(t, args);
 				return {content: [{type: 'text', text: r.text}], isError: r.error};
@@ -198,6 +198,9 @@ export function dsServer(sdk: Sdk, tools: DsTool[] = []): unknown {
 		),
 	});
 }
+
+/** The `ds` server: the tools given, and rule_spec. */
+export const dsServer = (sdk: Sdk, tools: DsTool[] = []): unknown => inProcessServer(sdk, SERVER, [...tools, ruleSpecTool]);
 
 /** Cortex's SDK hangs, silently, when its CLI is missing (0.0.2 and 0.0.3 record the spawn error and never
  *  report it), so look first, the way the SDK will: CORTEX_CODE_CLI_PATH, else `cortex` on PATH. */
@@ -223,11 +226,11 @@ export function dsToolsFor(cwd: string, connection?: string): {tools: DsTool[]; 
 }
 
 /** What every session gets, whichever agent runs it: ds-next's tools (rule_spec is added where they're
- *  served), the code graph and Serena when installed, the tools that never ask, and the system prompt. */
+ *  served), the code tools and how to stop their servers, the tools that never ask, and the system prompt. */
 export function sessionParts(cwd: string, connection?: string) {
 	const {tools, canon, skills} = dsToolsFor(cwd, connection);
-	const code = codetools.mcpServers(cwd);
-	return {tools, code, readOnly: readOnlyIds(tools, code), prompt: systemPrompt(cwd, canon, skills)};
+	const code = codeTools(cwd);
+	return {tools, code: code.tools, closeCode: code.close, readOnly: readOnlyIds(tools, code.tools), prompt: systemPrompt(cwd, canon, skills)};
 }
 
 export async function openSession(o: SessionOptions): Promise<AgentSession> {
@@ -237,10 +240,10 @@ export async function openSession(o: SessionOptions): Promise<AgentSession> {
 		throw new AgentUnavailable(`Cortex Code CLI not found: ${where}. Install it, or run with --agent claude or --agent codex.`);
 	}
 	const sdk = await load(o.backend);
-	const {tools, code, readOnly, prompt} = sessionParts(o.cwd, o.connection);
+	const {tools, code, closeCode, readOnly, prompt} = sessionParts(o.cwd, o.connection);
 	const canUseTool = permissionGate(o.ask, readOnly);
 	const abortController = new AbortController();
-	const common = {cwd: o.cwd, mcpServers: {[SERVER]: dsServer(sdk, tools), ...code}, canUseTool, model: o.model, effort: o.effort, resume: o.resume, abortController};
+	const common = {cwd: o.cwd, mcpServers: {[SERVER]: dsServer(sdk, tools), [CODE_SERVER]: inProcessServer(sdk, CODE_SERVER, code)}, canUseTool, model: o.model, effort: o.effort, resume: o.resume, abortController};
 	const options =
 		o.backend === 'claude'
 			? {
@@ -258,9 +261,6 @@ export async function openSession(o: SessionOptions): Promise<AgentSession> {
 					onlyExplicitMcpServers: true, // skip the user's mcp.json, or `ds` tools appear twice
 				};
 
-	// Refresh the code graph alongside the first turn, as ds-next does when it connects.
-	if (codetools.graphBin() && existsSync(join(o.cwd, '.git'))) void codetools.index(o.cwd).then(text => o.onEvent({kind: 'note', text}));
-
 	const box = inbox();
 	const q = sdk.query({prompt: box.messages(), options});
 	void (async () => {
@@ -269,6 +269,7 @@ export async function openSession(o: SessionOptions): Promise<AgentSession> {
 		} catch (err) {
 			if (!abortController.signal.aborted) o.onEvent({kind: 'error', message: (err as Error).message.split('\n')[0] ?? String(err)});
 		} finally {
+			void closeCode(); // the language servers, if any tool started one
 			o.onClose();
 		}
 	})();

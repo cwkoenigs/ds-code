@@ -7,7 +7,7 @@ The ds-next agent terminal in Node, drawn in Rule or Rail, for the team on Mac a
 - Lint: `npm run typecheck`
 - Before changing anything, read `.ds/manifest.toml`: it says which standards are in force here.
 - The team's knowledge base is served by `ds-next mcp` (canon_list, canon_read, code_search, code_get, code_add) for any agent that can reach it.
-- `rule mcp` serves all of ds-next's agent tools, ported here, plus `rule_spec`; this repo's Codex and Claude Code configs start it as `ds`.
+- `rule mcp` serves all of ds-next's agent tools, ported here, plus `rule_spec` and the `code` tools (definitions, references, callers, file outlines, change impact, from the language servers rule ships); this repo's Codex and Claude Code configs start it as `ds`.
 
 ## Directory map
 
@@ -15,15 +15,17 @@ The ds-next agent terminal in Node, drawn in Rule or Rail, for the team on Mac a
 holds, and where to make a given change. Read it before changing code. In short:
 
 - `src/` the CLI: `cli.tsx` (commands), `agent/` (`rule agent` and its two looks), `ds/` (ds-next's
-  tools, ported), `rail/` (Rail), `components/`, `tour/` and `demo/` (Rule's walkthrough), and the
-  row model, tokens and theme at the top.
-- `python/` ds-next's code-cutting functions, unchanged. `scripts/` `npm run index`. `test/` vitest,
-  and `test/parity/`, the comparison with ds-next's Python.
+  tools, ported), `code/` (the code tools and their language-server client), `rail/` (Rail),
+  `components/`, `tour/` and `demo/` (Rule's walkthrough), and the row model, tokens and theme at the top.
+- `python/` ds-next's code-cutting functions, unchanged. `test/` vitest, `test/fixtures/` the stand-ins
+  and the two small projects the code tools are tested on, and `test/parity/`, the comparison with
+  ds-next's Python.
 
 ## Setup
 
 Node 22.22 or newer (the team runs 26): `npm install` (builds), then `npm link` for the `rule` command.
-Optional: codebase-memory-mcp and Serena for the code graph and symbol lookups; see `ARCHITECTURE.md`.
+The code tools' language servers (TypeScript's and Pyright) come with `npm install`; there is nothing
+else to install.
 
 ## Required checks
 
@@ -49,16 +51,19 @@ Every change, by a person or an agent:
 
 ## Code tools
 
-`ds` (`rule mcp`) answers from the canon: standards, scaffolds, blocks, accepted code. When `graph`
-(codebase-memory-mcp) and `lsp` (Serena) are available, use them before text search:
-`find_symbol` and `find_referencing_symbols` for definitions and callers, `trace_path` and
-`get_architecture` for how parts connect. Run `npm run index` if the graph is stale.
+`ds` answers from the canon: standards, scaffolds, blocks, accepted code. `code` answers from the
+language servers, and is quicker and surer than text search: `repo_overview` to learn a repo,
+`file_symbols` before reading a file, `find_symbol` and `definition` for where something is defined,
+`references` and `callers` before changing or removing anything, `change_impact` before finishing a
+change. Both come from `rule agent` and from `rule mcp`; nothing to install or refresh.
 
 ## Files requiring extra care
 
 - `src/rail/tokens.ts`: must equal ds-next's `src/ds_next/ui_style.py`; `test/rail.test.tsx` checks.
 - `src/ds/`: a port of ds-next's Python with the same names, arguments and outputs; keep parity.
 - `src/agent/backend.ts`: the permission gate. Only reads belong in the allowlist; writes always ask.
+- `src/code/tools.ts`: every tool there passes the gate without asking, so every tool must only read.
+  A tool that writes belongs in `ds`.
 - `package-lock.json`: regenerate with npm, never by hand.
 
 <!-- ds:inherited canon 2026-10-26 -->

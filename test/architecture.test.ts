@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 const ROOT = join(import.meta.dirname, '..');
-const MAPPED = ['src', 'python', 'scripts', 'test'];
+const MAPPED = ['src', 'python', 'scripts', 'test'].filter(d => existsSync(join(import.meta.dirname, '..', d)));
 const page = readFileSync(join(ROOT, 'ARCHITECTURE.md'), 'utf8');
 
 function files(dir: string): string[] {

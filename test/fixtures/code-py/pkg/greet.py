@@ -1,0 +1,6 @@
+def greet(name: str) -> str:
+    return f"hello {name}"
+
+
+def shout(name: str) -> str:
+    return greet(name).upper()

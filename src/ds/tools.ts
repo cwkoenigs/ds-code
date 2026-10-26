@@ -416,18 +416,13 @@ export async function runTool(t: DsTool, args: Record<string, unknown>): Promise
 	}
 }
 
-/** The prompt lines for whichever code-intelligence tools are installed. */
-export function codeToolLines(cwd: string): string {
-	const servers = codetools.mcpServers(cwd);
-	const lines: string[] = [];
-	if (codetools.GRAPH in servers) {
-		lines.push(
-			`- Query the code graph before reading files: \`graph\` tools search_graph, search_code and trace_path find what already exists and who calls it (project "${codetools.graphProject(cwd)}"). Reuse what it finds instead of rewriting it.`,
-		);
-	}
-	if (codetools.LSP in servers) lines.push('- Before changing or removing a symbol, use the `lsp` tools find_symbol and find_referencing_symbols to see every use of it.');
-	lines.push('- For Snowflake questions (docs, tables, columns), use snowflake_search before guessing.');
-	return lines.join('\n');
+/** The prompt lines for the code tools (src/code/tools.ts, always served) and Snowflake search. Where
+ *  ds-next named the code graph and Serena, rule names its own `code` tools. */
+export function codeToolLines(): string {
+	return [
+		'- Use the `code` tools before text search: repo_overview to learn a repo, file_symbols before reading a file, find_symbol and definition for where something is defined, references and callers before changing or removing anything, change_impact before finishing a change. Reuse what they find instead of rewriting it.',
+		'- For Snowflake questions (docs, tables, columns), use snowflake_search before guessing.',
+	].join('\n');
 }
 
 /** ds-next's system prompt, word for word. */
@@ -465,7 +460,7 @@ Rules:
   package. block_add takes a whole block when you need most of it. Before building anything, read the gotchas
   (canon_list marks them) whose tags match the work: they are mistakes already made here once.
 - When a skill fits the request, skill_read it and follow it.
-${codeToolLines(cwd)}
+${codeToolLines()}
 - When the session uncovers something the team should remember, offer to capture it.
 - Be brief. This is a terminal.
 

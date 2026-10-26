@@ -9,6 +9,10 @@ the CLI started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Added
+- The `code` tools, served by `rule agent` beside `ds` and by `rule mcp`, to every agent: `find_symbol`,
+  `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview` and `change_impact`,
+  answered by TypeScript 7's language server and Pyright, which install with `rule` from npm. Nothing
+  else to install, nothing leaves the machine. (#3)
 - `rule agent --agent codex`: Codex as a third agent, through `codex app-server`, with the same
   approvals and ds-next's tools; the turn footer shows its token count. (#2)
 - `rule mcp`: ds-next's tools and `rule_spec` as an MCP server, for Codex, Cortex Code or Claude Code
@@ -28,7 +32,14 @@ the CLI started (`cwkoenigs/ds-next#N`).
   `rule demo`. (cwkoenigs/ds-next#1)
 
 ### Changed
+- `typescript` is a runtime dependency now (the code tools run its native language server), and
+  `pyright` is a new one. (#3)
 - `rule agent` asks Serena 2 for one tool per operation, so Serena's reads pass without asking. (#1)
+
+### Removed
+- Serena and codebase-memory-mcp: `rule agent` no longer looks for them, and `.serena/`, `npm run index`
+  and the `graph` and `lsp` servers in `.codex/config.toml` and `.mcp.json` are gone. The `code` tools
+  replace them, with nothing to install or approve. (#3)
 - **Needs Node 22.22 or newer** (was 20): every dependency is at its latest release, including ink 8,
   TypeScript 7 and vitest 5. (cwkoenigs/ds-next#4)
 

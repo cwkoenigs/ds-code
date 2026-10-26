@@ -16,10 +16,12 @@ flowchart TD
   events -- "AgentEvent" --> app
   sdk -- "may I run this?" --> gate["permissionGate<br/>agent/backend.ts"]
   gate -- "reads: yes at once<br/>everything else" --> app
-  sdk -- "ds tool call" --> server["ds tools, in process: an MCP server for the SDKs,<br/>dynamic tools for Codex"]
+  sdk -- "ds or code tool call" --> server["in process: two MCP servers for the SDKs,<br/>dynamic tools for Codex"]
   server --> tools["ds-next's tools<br/>ds/tools.ts"]
   tools --> kb["canon, skills, scaffolds,<br/>reconcile, code<br/>ds/*.ts"]
   kb --> disk[("canon and skills-os<br/>on disk")]
+  server --> code["the code tools<br/>code/tools.ts"]
+  code --> lsp["TypeScript's and Pyright's language servers,<br/>started from rule's node_modules<br/>code/lsp.ts, code/servers.ts"]
   app -- "what happened" --> look["the look: Rule or Rail<br/>agent/looks.tsx"]
   look -- "rows of spans" --> screen["transcript, written once<br/>footing, redrawn<br/>components/*"]
   screen --> theme["roles to colours<br/>theme.ts"]
@@ -30,10 +32,10 @@ flowchart TD
 2. **Local or agent.** `/status`, `/model`, `/last`, `/clear`, `/help`, `/exit` and `?` are answered
    locally. Anything else, unknown `/commands` included, goes to the agent.
 3. **The session.** The first message opens a session (`openSession`). It picks the agent, serves it
-   ds-next's 17 tools plus `rule_spec` in process, attaches the code graph and Serena when they're
-   installed, and starts streaming. The Claude and Cortex SDKs take the tools as an MCP server; Codex
-   runs as `codex app-server` and takes them as dynamic tools (`agent/codex.ts`). Later messages
-   reuse the session; after a crash or a stall the next message resumes it.
+   ds-next's 17 tools plus `rule_spec` as `ds` and the eight code tools as `code`, all in process, and
+   starts streaming. The Claude and Cortex SDKs take the tools as MCP servers; Codex runs as `codex
+   app-server` and takes them as dynamic tools (`agent/codex.ts`). Later messages reuse the session;
+   after a crash or a stall the next message resumes it.
 4. **Events.** The two SDKs emit the same message shapes, which `normalize` reduces to a few
    `AgentEvent`s: init, thinking, text, tool, toolResult, result, error, note. `codex.ts` reduces
    Codex's thread items and turn notifications to the same events.
@@ -66,8 +68,13 @@ flowchart TD
 - **The ds tools are ds-next's.** `ds/` is a port of ds-next's Python with the same tool names,
   descriptions, arguments and outputs. `test/parity/run.sh` runs both through 229 steps on a real
   canon and compares everything. Reads never ask; writes always do.
-- **Missing pieces never crash.** No canon: each tool says what to set up. No graph or Serena: not
-  offered. No Cortex CLI: said at once, since its SDK would hang.
+- **The code tools answer from language servers rule ships.** `code/` starts TypeScript 7's server and
+  Pyright from rule's own `node_modules`, on the first call that needs one, and stops them with the
+  session. Nothing is installed on the machine beyond `npm install`, and nothing leaves it. Every code
+  tool reads; none asks.
+- **Missing pieces never crash.** No canon: each tool says what to set up. A language server that
+  stops is started again on the next call; one that takes too long says so. No Cortex CLI: said at
+  once, since its SDK would hang.
 
 ## Every file
 
@@ -116,9 +123,9 @@ flowchart TD
 | File | Holds |
 |---|---|
 | `src/agent/AgentApp.tsx` | `rule agent`: the session, local commands, the queue, interrupts, the stall watchdog, approvals one at a time |
-| `src/agent/backend.ts` | Which agent (`chooseBackend`), loading its SDK, the permission gate, the in-process `ds` server, `rule_spec`, the system prompt, `openSession` |
-| `src/agent/codex.ts` | Codex: `codex app-server` over JSON-RPC, ds-next's tools as dynamic tools, approvals through the gate, Codex's items as `AgentEvent`s |
-| `src/agent/mcp.ts` | `rule mcp`: ds-next's tools and `rule_spec` as a stdio MCP server, for an agent run on its own |
+| `src/agent/backend.ts` | Which agent (`chooseBackend`), loading its SDK, the permission gate, the in-process `ds` and `code` servers, `rule_spec`, the system prompt, `openSession` |
+| `src/agent/codex.ts` | Codex: `codex app-server` over JSON-RPC, ds-next's and the code tools as dynamic tools, approvals through the gate, Codex's items as `AgentEvent`s |
+| `src/agent/mcp.ts` | `rule mcp`: ds-next's tools, `rule_spec` and the code tools as a stdio MCP server, for an agent run on its own |
 | `src/agent/events.ts` | `AgentEvent` and `normalize`: SDK messages from either agent reduced to a few events |
 | `src/agent/looks.tsx` | `AgentLook` and its two implementations, `RULE` and `RAIL`: everything that differs between the looks |
 | `src/agent/markdown.ts` | Agent Markdown as lines (`markdownLines`), and Rule's framing of it (`agentRows`) |
@@ -142,15 +149,18 @@ flowchart TD
 | `src/ds/scaffold.ts` | New projects from a scaffold, adopting a repo, adding a block, the pre-push hook |
 | `src/ds/reconcile.ts` | `check`: a repo's manifest against the canon (adopted, declined, pending, errors) |
 | `src/ds/code.ts` | `code_search`, `code_get`, `code_add`, through the Python helper |
-| `src/ds/codetools.ts` | The code graph and Serena as MCP servers, their read-only tools, refreshing the graph, `cortex search` |
+| `src/ds/codetools.ts` | `snowflake_search`'s `cortex search`, the part of ds-next's codetools that remains (its graph and Serena are replaced by `src/code/`) |
 | `src/ds/py.ts` | The bits of Python behaviour the port depends on: repr, json.dumps, path resolution, shlex, which |
 | `python/code_cut.py` | ds-next's code-cutting functions, unchanged: a canon module cut down to the symbols asked for, with Python's own parser |
 
-### Scripts
+### The code tools
 
 | File | Holds |
 |---|---|
-| `scripts/index.mjs` | `npm run index`: build or refresh the code graph for this repo |
+| `src/code/tools.ts` | The eight `code` tools (`find_symbol`, `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview`, `change_impact`) and `CodeIntel`, which asks the servers and shapes the answers |
+| `src/code/lsp.ts` | `LanguageServer`: a small LSP client over stdio (Content-Length framing, requests, the client's answers to the server) and `openFile` |
+| `src/code/servers.ts` | Which server reads which file, and how to start each from rule's `node_modules`: TypeScript 7's `tsc --lsp`, Pyright's `pyright-langserver`; the project's `.venv` for Pyright |
+| `src/code/repo.ts` | What needs no server: the repo's files (`git ls-files`), its import graph and entry points for `repo_overview`, the lines `git diff` says changed for `change_impact` |
 
 ### Tests
 
@@ -161,10 +171,12 @@ flowchart TD
 | `test/agent.test.tsx` | `rule agent` in Rule with a scripted agent, events, how tools read, the permission gate, both SDKs build every tool |
 | `test/rail.test.tsx` | Rail's tokens against ds-next's `ui_style.py`, its grid, its screens and page, `rule agent` and its demo in Rail |
 | `test/ds.test.ts` | The ds port on a small canon: render, write, reconcile, blocks, code, tools |
-| `test/codetools.test.ts` | How the code graph and Serena are attached, with fake binaries |
+| `test/code.test.ts` | The code tools against the real servers: the two fixture projects, a git repo with changes, this repo; the gate and Codex naming; imports and resolution |
 | `test/codex.test.tsx` | Codex against a stand-in app-server, drawn in Rail, and end to end with the real app-server and a stand-in model; `rule mcp` |
 | `test/fixtures/fake-codex.mjs` | A stand-in for `codex app-server`: one scripted turn with a ds tool call and a command approval |
 | `test/fixtures/fake-model.ts` | A stand-in for the model API Codex calls, so the real app-server plays a turn with no account |
+| `test/fixtures/code-ts/package.json`, `test/fixtures/code-ts/tsconfig.json`, `test/fixtures/code-ts/src/greet.ts`, `test/fixtures/code-ts/src/main.ts` | A small TypeScript project for the code tools: `greet`, `shout` which calls it, `run` which calls both |
+| `test/fixtures/code-py/pyproject.toml`, `test/fixtures/code-py/pkg/__init__.py`, `test/fixtures/code-py/pkg/greet.py`, `test/fixtures/code-py/pkg/main.py` | The same project in Python |
 | `test/architecture.test.ts` | That this page names every file, and names no file that is gone |
 | `test/helpers.ts` | Shared: waiting for a frame, waiting for the input hooks, a scripted agent session |
 | `test/parity/run.sh` | The parity check with ds-next's Python (needs a ds-next checkout, the canon and skills-os) |
@@ -183,8 +195,10 @@ flowchart TD
 | A third look | A new `AgentLook` in `src/agent/looks.tsx`, its tokens in `src/theme.ts`'s `INKS`, its name in `LOOKS` in `src/tokens.ts` |
 | A local command (`/something`) | `COMMANDS` and `run` in `src/agent/AgentApp.tsx` |
 | A key | `useLineEditor` in `src/components/live.tsx` for editing; the `useInput` in `src/agent/AgentApp.tsx` for the rest |
-| Which tools never ask | `READ_ONLY` and `readOnlyIds` in `src/agent/backend.ts`; a ds tool's `readOnly` in `src/ds/tools.ts`; graph and Serena reads in `src/ds/codetools.ts` |
+| Which tools never ask | `READ_ONLY` and `readOnlyIds` in `src/agent/backend.ts`; a ds tool's `readOnly` in `src/ds/tools.ts` (every code tool reads) |
 | An agent tool | `src/ds/tools.ts` (port it from ds-next first; add it to `test/parity/` when it reads the canon) |
+| A code tool, or what one answers | `TOOLS` and `CodeIntel` in `src/code/tools.ts`; its name in `CODE_TOOL_NAMES` there |
+| A language the code tools read | `EXTENSIONS` and `serverSpec` in `src/code/servers.ts`, with a server that speaks LSP over stdio and installs from npm |
 | What the agent is told | `systemPrompt` in `src/agent/backend.ts` and `src/ds/tools.ts` |
 | A new agent (SDK) | `src/agent/backend.ts` (`Backend`, `chooseBackend`, `load`, `openSession`), then `normalize` in `src/agent/events.ts` if its messages differ; `src/agent/codex.ts` is the pattern for an agent with its own protocol |
 | What Codex may do without asking | The thread's `approvalPolicy` and `sandbox` in `src/agent/codex.ts` |
@@ -193,31 +207,45 @@ flowchart TD
 | A CLI command or flag | `src/cli.tsx` and its `HELP` text |
 | Rule's tour | `src/tour/chapters.tsx`, its data in `src/spec.ts`, its screens in `src/screens.ts` |
 
-## The code graph and Serena
+## The code tools
 
-Two optional tools give an agent working in this repo more than text search. `rule agent` attaches
-both when they're on your PATH; for Codex, Claude Code and Cortex sessions opened in this folder, the
-repo carries their config, along with `ds`: ds-next's tools from `rule mcp` (needs `rule` on your
-PATH, from `npm link`).
+Eight read-only tools give an agent more than text search, answered by the language servers rule
+ships rather than by anything installed on the machine. `rule agent` serves them in process as `code`
+beside `ds`; `rule mcp` serves both sets to Codex, Claude Code or Cortex Code run on their own, and
+the repo carries that config (`.codex/config.toml`, `.mcp.json`; needs `rule` on your PATH, from
+`npm link`).
 
-| Tool | What it answers | Install |
-|---|---|---|
-| [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) | Callers and callees, symbols, file outlines, from its own index (served read-only, `--tool-profile=analysis`) | Download the release for your machine, check it against the release's `checksums.txt`, put the binary on your PATH (`~/.local/bin`). Its own installer reconfigures every agent on the machine; skip it. ds-next was tested with 0.11.0 |
-| [Serena](https://github.com/oraios/serena) | Definitions, references, implementations, diagnostics, from the TypeScript language server | `uv tool install serena-agent==2.1.0` |
+| Tool | Answers |
+|---|---|
+| `repo_overview` | Languages, directories, the files most imported, entry points. No server; `git ls-files` and the import statements |
+| `file_symbols` | A file's outline: functions, classes and members, variables, types, with lines |
+| `find_symbol` | Where a name is defined, repo-wide or in one file; `Class.method` for a member |
+| `definition` | Where the name on a given line is defined, a package or the standard library included |
+| `references` | Every use of a symbol, by file and line, with the line of code |
+| `callers` | Who calls a function, and who calls them, to a depth |
+| `callees` | What a function calls, in the repo and outside it |
+| `change_impact` | The uncommitted changes, symbol by symbol, where each is used, and the files that depend on the change without being changed |
 
+- **The servers.** TypeScript 7's native language server (`tsc --lsp --stdio`, from the `typescript`
+  package) for TypeScript and JavaScript; Pyright (`pyright-langserver --stdio`, from the `pyright`
+  package) for Python. Both are Microsoft's, Apache-2.0 and MIT, and both come with `npm install`,
+  so a registry mirror such as Nexus is all they need. Neither makes a network request; the only
+  thing that leaves the machine is what the agent itself sends its model.
+- **Starting and stopping.** A server starts on the first tool call for its language and stays for
+  the session; `rule agent` and `rule mcp` stop them when the session ends. The first call loads the
+  project: under a second here, a few seconds on a large repo.
+- **What each server sees.** TypeScript's follows the nearest `tsconfig.json`: files outside its
+  `include` (this repo's tests, for instance) are read when asked about directly, but references
+  from them to `src/` are not found. Pyright resolves the repo's own modules always, and installed
+  packages when the repo has a `.venv` or `venv` (uv's and venv's places) or `python` is on the PATH.
 - **Codex** reads `.codex/config.toml`, once you trust the project (Codex asks the first time you open
-  it). Start Codex in this folder. `codex mcp list` shows `ds`, `graph` and `lsp`. When `rule agent`
-  runs Codex, it switches the `ds` server off, since it serves the same tools itself.
-- **Claude Code** reads `.mcp.json` and asks once before starting each server.
+  it). `codex mcp list` shows `ds`. When `rule agent` runs Codex, it switches that server off, since it
+  serves the same tools itself.
+- **Claude Code** reads `.mcp.json` and asks once before starting the server.
 - **Cortex Code** isn't checked yet. Its SDK is a fork of Claude Code's and reads Claude Code's own
-  config (`~/.claude.json`) besides Cortex's `mcp.json`, so it may pick up `.mcp.json` too. Check that
-  `graph` and `lsp` show in Cortex's MCP list in this folder; if they don't, add the two servers from
-  `.mcp.json` to Cortex's `mcp.json`.
-- **The graph's index** is built by `npm run index`, and by `rule agent` when a session starts. Refresh
-  it after pulling or after large changes.
-- **Serena's settings** are in `.serena/project.yml`: TypeScript, and `agent_interface: tools`, so every
-  agent sees one tool per operation (`find_symbol`, `find_referencing_symbols`...) rather than Serena
-  2's single REPL tool.
+  config (`~/.claude.json`) besides Cortex's `mcp.json`, so it may pick up `.mcp.json` too. If `ds`
+  doesn't show in Cortex's MCP list in this folder, add the server from `.mcp.json` to Cortex's
+  `mcp.json`.
 
 ## Keeping this page true
 

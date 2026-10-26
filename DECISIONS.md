@@ -145,7 +145,7 @@ from its git history. Each is dated when it was made.
 
 ## local-008: Serena serves one tool per operation
 
-- **Status:** Accepted
+- **Status:** Superseded by local-010 on 2026-10-26: Serena is no longer used.
 - **Date:** 2026-10-26
 - **Context:** Serena 2 serves a single REPL tool (`serena_repl`) by default. `rule agent` allows
   Serena's reads without asking by tool name, and Codex and Claude Code show tools by name.
@@ -190,3 +190,34 @@ from its git history. Each is dated when it was made.
   yes; on a no, the command was declined and the turn ended. Codex has not yet been run against a
   real model.
 - **Review date:** each `@openai/codex` upgrade.
+
+## local-010: The code tools run on language servers rule ships
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** The owner's work machine takes software only through Nexus (its npm and PyPI
+  mirrors), and the work holds PHI, so every tool has to be defensible to security. Of the two tools
+  ds-next attached, Serena could come through Nexus but is GPL-3.0 and reports its use to its maker on
+  every start; codebase-memory-mcp could not, since its npm and PyPI packages download the real
+  binary from GitHub. Snowflake's own semantic search (tgrep) does not work on the owner's account.
+- **Options considered:**
+  1. **Serena alone, the graph dropped**: installable through Nexus, but the licence and the usage
+     report are questions for security, and its one-tool-per-operation mode needs a flag (local-008).
+  2. **Another third-party code graph**: the same small-maintainer or hosted-service problem.
+  3. **The lookups built into rule, on Microsoft's TypeScript 7 server and Pyright**: chosen. Both are
+     npm packages (Apache-2.0 and MIT), both work offline, and `typescript` was already a dependency.
+- **Decision:** `src/code/` is a small LSP client and eight read-only tools (`find_symbol`,
+  `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview`, `change_impact`),
+  served in process as `code` by `rule agent` and by `rule mcp`, and to Codex as dynamic tools. The
+  servers start on the first call that needs one, from rule's own `node_modules`, and stop with the
+  session. Serena, codebase-memory-mcp, `.serena/`, `npm run index` and their config are removed.
+- **Consequences:** Nothing to install or approve beyond `npm install`, and the same tools in every
+  agent. `typescript` moves from devDependencies to dependencies (its native server, about 24 MB) and
+  `pyright` is added (about 38 MB). TypeScript's server finds cross-file references only inside the
+  nearest `tsconfig.json`'s include; Pyright resolves installed packages only with a `.venv`, a `venv`
+  or `python` on the PATH. A third language means a server that speaks LSP over stdio and installs
+  from npm.
+- **Validation:** `test/code.test.ts` runs the real servers on two small projects, a git repo with
+  uncommitted changes, and this repo; the Codex end-to-end test calls a code tool through the real
+  app-server. 103 tests pass on Node 22.22 and 26.
+- **Review date:** each `typescript` or `pyright` upgrade.

@@ -67,18 +67,35 @@ rule agent --agent codex            # or DS_AGENT=codex once, in your shell prof
   - Each tool shows as ▫ while it runs, then lands as ▪ with its result as a fact (`142 lines`, `+14 −1`).
   - Replies print as Rule Markdown: uppercase headings, code on the surface colour.
   - Each turn ends with `N tools  12.3s  $0.0123` (Cortex reports no cost).
-- **Approvals:** anything that writes a file or runs a command opens the approval dialog. `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and the code graph's and LSP's reads.
+- **Approvals:** anything that writes a file or runs a command opens the approval dialog. `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and every `code` tool.
 - **Keys:** `esc` interrupts a turn, `ctrl-o` opens the last fold, and messages typed mid-turn are queued.
 - **Commands:** `/status`, `/model <name>`, `/clear` (new conversation) and `/exit` are local; any other `/command` goes to the agent.
 - **Stalls:** a turn silent for 10 minutes, outside an approval, is interrupted, as in ds-next. The next message carries on the same session.
 
-### ds-next's tools for any agent: `rule mcp`
+### The tools for any agent: `rule mcp`
 
-`rule mcp` serves the same tools as an MCP server over stdio, for Codex, Cortex Code or Claude Code run on their own. Each tool says whether it only reads, and the agent asks about the rest by its own rules. This repo's `.codex/config.toml` and `.mcp.json` already start it as `ds`. To have it everywhere in Codex:
+`rule mcp` serves the same tools, ds-next's and the code tools, as an MCP server over stdio, for Codex, Cortex Code or Claude Code run on their own. Each tool says whether it only reads, and the agent asks about the rest by its own rules. This repo's `.codex/config.toml` and `.mcp.json` already start it as `ds`. To have it everywhere in Codex:
 
 ```sh
 codex mcp add ds -- rule mcp
 ```
+
+### The code tools
+
+Eight read-only tools answer what text search can't, from language servers that come with `rule`: TypeScript 7's native server for TypeScript and JavaScript, and Pyright for Python. Both are Microsoft's, both install with `npm install` (so through a registry mirror such as Nexus), both run on your machine and send nothing anywhere. There is nothing else to install or to refresh.
+
+| Tool | Answers |
+|---|---|
+| `repo_overview` | Languages, directories, the files most imported, entry points |
+| `file_symbols` | A file's outline, with lines |
+| `find_symbol` | Where a name is defined; `Class.method` for a member |
+| `definition` | Where the name on a given line is defined |
+| `references` | Every use of a symbol, with the line of code |
+| `callers` | Who calls a function, and who calls them, to a depth |
+| `callees` | What a function calls, in the repo and outside it |
+| `change_impact` | The uncommitted changes, symbol by symbol, and the files that depend on them without being changed |
+
+A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`; Pyright uses the repo's `.venv` or `venv` for installed packages when there is one.
 
 ### ds-next's tools
 
@@ -86,7 +103,7 @@ The agent gets ds-next's tools, ported to TypeScript in `src/ds/`, with the same
 
 - **Reads, never asked:** `canon_list`, `canon_read`, `skills_list`, `skill_read`, `project_status`, `scaffold_list`, `scaffold_get`, `block_list`, `block_get`, `code_search`, `code_get`, `snowflake_search`.
 - **Writes, each through the approval dialog:** `scaffold_project` (only from a scaffold the agent fetched this session), `adopt_repo`, `block_add`, `code_add`, `capture`.
-- **The code graph and the LSP** (`codebase-memory-mcp`, `serena`) are attached when installed, as in ds-next. The graph is refreshed when the session starts.
+- **Where ds-next attaches the code graph and Serena,** `rule` serves its own code tools (above), with nothing to install.
 
 They read the canon and skills-os where ds-next does: `DS_CANON` and `DS_SKILLS`, else `~/Developer`, `~/code` or `~/.ds`. Without a canon the session still starts, and each tool that needs it says what to set up.
 
@@ -139,8 +156,8 @@ Everything else is shared: the agent and its tools, the queue, `esc`, the watchd
 ## What's where, and what changed
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): how a turn flows, the rules the code keeps, every file and what
-  it holds, where to make a given change, and the code graph and Serena setup for Codex, Claude Code
-  and Cortex.
+  it holds, where to make a given change, and the code tools and how Codex, Claude Code and Cortex
+  reach them.
 - [`DECISIONS.md`](DECISIONS.md): the decisions so far and the options weighed.
 - [`CHANGELOG.md`](CHANGELOG.md): what changed, by pull request.
 - [`AGENTS.md`](AGENTS.md): what any agent working here reads first.
@@ -163,14 +180,15 @@ Write the transcript once with `useTranscript()` and `<Transcript>`, built on In
 ## Checks
 
 ```sh
-npm test           # 91 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
+npm test           # 103 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
                    # while wrapping, the spec is complete, the demo, tour and agent session driven by
                    # keystrokes (the agent scripted) in both looks, Rail's tokens against ds-next's
                    # ui_style.py, the permission gate, both SDKs build all 17 tools, Codex against a
                    # stand-in and end to end with the real app-server and a stand-in model, rule mcp,
-                   # the ds port on a small canon, how the code graph and Serena attach, and that
+                   # the ds port on a small canon, the code tools against the real language servers
+                   # on two small projects, a git repo with changes and this repo, and that
                    # ARCHITECTURE.md names every file
 npm run typecheck
 ```
 
-Dependencies are pinned to exact versions, so every machine gets the same ones, and were all at their latest release on 2026-10-25 (`npm outdated` lists nothing, `npm audit` finds nothing). Ink 8, chalk 6 and vitest 5 need Node 22, and the Cortex SDK 22.22. `@snowflake/cortex-agent-sdk` is at 0.0.3, one release ahead of the Python package ds-next pins (`snowflake-cortex-agent-sdk==0.0.2`). Like 0.0.2, it hangs when its CLI is missing, so `rule agent` checks for the CLI first.
+Dependencies are pinned to exact versions, so every machine gets the same ones, and were all at their latest release on 2026-10-25 (`npm outdated` lists nothing, `npm audit` finds nothing). Ink 8, chalk 6 and vitest 5 need Node 22, and the Cortex SDK 22.22. `@snowflake/cortex-agent-sdk` is at 0.0.3, one release ahead of the Python package ds-next pins (`snowflake-cortex-agent-sdk==0.0.2`). Like 0.0.2, it hangs when its CLI is missing, so `rule agent` checks for the CLI first. `typescript` and `pyright` are runtime dependencies: the code tools run their language servers.

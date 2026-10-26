@@ -7,6 +7,7 @@ import {type ChildProcess, spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {createInterface} from 'node:readline';
 import {z} from 'zod';
+import {CODE_SERVER, isCodeTool} from '../code/tools.js';
 import {type DsTool, runTool} from '../ds/tools.js';
 import {type AgentSession, AgentUnavailable, permissionGate, ruleSpecTool, SERVER, sessionParts, type SessionOptions} from './backend.js';
 import type {AgentEvent} from './events.js';
@@ -119,6 +120,9 @@ function fileChange(changes: unknown): {name: string; input: Obj} {
 	};
 }
 
+/** Dynamic tools are one flat list to Codex; rule names each by the server it belongs to. */
+const serverOf = (tool: string): string => (isCodeTool(tool) ? CODE_SERVER : SERVER);
+
 /** A Codex thread item as the tool call rule shows: its name and input. Undefined for items that aren't tools. */
 export function toolCall(item: Obj): {name: string; input: Obj} | undefined {
 	switch (item['type']) {
@@ -129,7 +133,7 @@ export function toolCall(item: Obj): {name: string; input: Obj} | undefined {
 		case 'mcpToolCall':
 			return {name: `mcp__${str(item['server'])}__${str(item['tool'])}`, input: (item['arguments'] as Obj) ?? {}};
 		case 'dynamicToolCall':
-			return {name: `mcp__${SERVER}__${str(item['tool'])}`, input: (item['arguments'] as Obj) ?? {}};
+			return {name: `mcp__${serverOf(str(item['tool']))}__${str(item['tool'])}`, input: (item['arguments'] as Obj) ?? {}};
 		case 'webSearch':
 			return {name: 'WebSearch', input: {query: str(item['query'])}};
 		default:
@@ -163,8 +167,8 @@ export function toolOutput(item: Obj): {text: string; isError: boolean} {
 
 export async function openCodexSession(o: SessionOptions): Promise<AgentSession> {
 	const {command, args} = codexCommand();
-	const {tools, code, readOnly, prompt} = sessionParts(o.cwd, o.connection);
-	const served = [...tools, ruleSpecTool];
+	const {tools, code, closeCode, readOnly, prompt} = sessionParts(o.cwd, o.connection);
+	const served = [...tools, ruleSpecTool, ...code];
 	const byName = new Map(served.map(t => [t.name, t]));
 	const gate = permissionGate(o.ask, readOnly);
 
@@ -256,7 +260,7 @@ export async function openCodexSession(o: SessionOptions): Promise<AgentSession>
 				const t = byName.get(str(p['tool']));
 				if (!t) return {success: false, contentItems: [{type: 'inputText', text: `ERROR: no tool ${str(p['tool'])}`}]};
 				const input = (p['arguments'] as Obj) ?? {};
-				if (!(await allowed(`mcp__${SERVER}__${t.name}`, input))) {
+				if (!(await allowed(`mcp__${serverOf(t.name)}__${t.name}`, input))) {
 					void interrupt(); // a "no" ends the turn, as with the other agents
 					return {success: false, contentItems: [{type: 'inputText', text: 'The person declined this and will say what to do instead.'}]};
 				}
@@ -264,7 +268,7 @@ export async function openCodexSession(o: SessionOptions): Promise<AgentSession>
 				return {success: !r.error, contentItems: [{type: 'inputText', text: r.text}]};
 			}
 			case 'mcpServer/elicitation/request':
-				return {action: 'decline', content: null, _meta: null}; // the graph and Serena never need to ask
+				return {action: 'decline', content: null, _meta: null}; // no server rule starts asks anything
 			default:
 				throw new Error(`rule does not handle ${method}`);
 		}
@@ -280,16 +284,14 @@ export async function openCodexSession(o: SessionOptions): Promise<AgentSession>
 		rpc.drop('Codex stopped');
 		if (!closed && turnId) emit({kind: 'error', message: `Codex stopped: ${stderr.trim().split('\n').pop() ?? 'no reason given'}`});
 		closed = true;
+		void closeCode(); // the language servers, if any tool started one
 		o.onClose();
 	});
 
-	// The graph and Serena as rule found them. A `ds` server in the repo's or the user's Codex config
-	// (`rule mcp`) would serve the same tools twice, so it is defined here switched off: valid whether or
-	// not one exists, which a bare "enabled = false" is not.
-	const mcpServers = {
-		...Object.fromEntries(Object.entries(code).map(([name, s]) => [name, {command: s.command, args: s.args}])),
-		[SERVER]: {command: 'rule', args: ['mcp'], enabled: false},
-	};
+	// A `ds` server in the repo's or the user's Codex config (`rule mcp`) would serve the same tools
+	// twice, so it is defined here switched off: valid whether or not one exists, which a bare
+	// "enabled = false" is not.
+	const mcpServers = {[SERVER]: {command: 'rule', args: ['mcp'], enabled: false}};
 	const thread = {
 		cwd: o.cwd,
 		model: o.model ?? null,
