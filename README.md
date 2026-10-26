@@ -26,7 +26,7 @@ rule screen                # all seven
 rule spec --json           # the spec as data
 rule html -o tour.html     # the tour as one web page, readable on a phone
 rule demo                  # a live session with a faked agent: type, / for commands, ? for keys
-rule agent                 # a real session with Cortex Code or Claude Code (see below)
+rule agent                 # a real session with Cortex Code, Claude Code or Codex (see below)
 ```
 
 ```sh
@@ -38,7 +38,17 @@ rule html --look rail      # Rail's screens as one web page (rail-screens.html),
 
 Options: `--theme dark|light` sets the theme for the prose and the demo. `--color truecolor|ansi16|none` forces the colour depth (otherwise it's whatever the terminal supports; 256-colour terminals like macOS Terminal get the palette downsampled). `--one-theme` shows each mockup only once. `--no-pause` prints the tour straight through, which also happens when the output is piped. To remove the command later: `npm rm -g rule-cli`.
 
-npm 11 may warn that esbuild and fsevents have install scripts it hasn't run. Both belong to the test tools, not to `rule`, so there is nothing to approve. On Windows, use Windows Terminal. The old console window lacks the box-drawing characters and truecolor.
+npm 11 may warn that esbuild and fsevents have install scripts it hasn't run. Both belong to the test tools, not to `rule`, so there is nothing to approve; don't run `npm install-scripts approve`, which would write your answer into `package.json` and block your next `git pull`. On Windows, use Windows Terminal. The old console window lacks the box-drawing characters and truecolor.
+
+### Updating
+
+```sh
+cd ~/Developer/rule-cli
+git pull
+npm ci             # installs exactly what package-lock.json says, builds, and never changes the lockfile
+```
+
+`npm ci` ("clean install") reads `package-lock.json` and installs those exact versions, deleting `node_modules` first; it refuses if `package.json` and the lockfile disagree, rather than guessing. `npm install` may rewrite the lockfile, and a rewritten lockfile is what makes `git pull` stop with "your local changes would be overwritten". If that happens, the lockfile is npm's to regenerate, not yours to keep: `git checkout -- package-lock.json`, then `git pull` and `npm ci`. Use `npm install <package>` only to add or change a dependency on purpose. `npm link` from the first install keeps working across updates.
 
 ## In the demo
 
@@ -95,7 +105,30 @@ Eight read-only tools answer what text search can't, from language servers that 
 | `callees` | What a function calls, in the repo and outside it |
 | `change_impact` | The uncommitted changes, symbol by symbol, and the files that depend on them without being changed |
 
-A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`; Pyright uses the repo's `.venv` or `venv` for installed packages when there is one.
+A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`, so references from files outside its `include` (this repo's tests, for instance) aren't found; Pyright uses the repo's `.venv` or `venv` for installed packages when there is one.
+
+**Trying them.** You ask in words; the agent picks the tool. Some prompts that reach each one:
+
+| Ask | Tool |
+|---|---|
+| "give me an overview of this repo" | `repo_overview` |
+| "outline src/agent/AgentApp.tsx" | `file_symbols` |
+| "where is permissionGate defined?" | `find_symbol` |
+| "what's the AgentApp on line 184 of src/cli.tsx?" | `definition` |
+| "where is openSession used?" | `references` |
+| "who calls permissionGate?" | `callers` |
+| "what does sessionParts call?" | `callees` |
+| "what would my uncommitted changes break?" | `change_impact` |
+
+The first real run, on a Mac on 2026-10-26, asked "who calls permissionGate?" and got, from `callers`: two direct callers, `openSession` at `src/agent/backend.ts:244`, which builds the gate for the Claude and Cortex sessions, and `openCodexSession` at `src/agent/codex.ts:173`, which builds it for Codex and is itself called from `openSession` at line 237, so every session's approvals go through the one gate, as `AGENTS.md` says.
+
+**Why these and not Serena or a code graph.** ds-next attaches [Serena](https://github.com/oraios/serena) and [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) for the same job. Serena is a middleman to the same TypeScript server (and GPL-3.0, and it reports its use to its maker on every start); codebase-memory-mcp keeps a whole-repo map, but its npm and PyPI packages download the real binary from GitHub, around a registry mirror. The code tools talk to the servers directly, so there is nothing for a middleman to do and nothing to put past security beyond `npm install`. `callers` to a depth, `repo_overview` and `change_impact` cover what the graph answered. `DECISIONS.md` local-010 weighs the options. If Serena is installed from before, it isn't used; `uv tool uninstall serena-agent` removes it.
+
+### At work: Nexus, and what leaves the machine
+
+- **Everything installs from npm,** so a registry mirror such as Nexus is all `rule` needs: its dependencies, the pinned Codex, TypeScript's server and Pyright all come with `npm ci`. Nothing is downloaded from anywhere else, and no install script needs approving.
+- **The tools run on your machine.** The `ds` tools read the canon and skills-os from disk; the `code` tools ask language servers running as child processes; neither makes a network request. Cortex Code's own code index (tgrep) needs an embedding model enabled on your Snowflake account; the code tools need nothing from the account.
+- **What leaves is what the agent sends its model:** your prompts, the files it reads, and the tools' answers, to OpenAI for Codex, Anthropic for Claude Code, or Snowflake for Cortex Code. That is true of every coding agent, with or without these tools, so which agent may see a repo that holds PHI is your compliance team's call, not something `rule` changes.
 
 ### ds-next's tools
 

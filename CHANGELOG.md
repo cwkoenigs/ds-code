@@ -9,6 +9,9 @@ the CLI started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Added
+- README: updating with `npm ci` and why, prompts that reach each code tool and the first real
+  answer, why the code tools rather than Serena or a code graph, and what does and doesn't leave the
+  machine at work. (#4)
 - The `code` tools, served by `rule agent` beside `ds` and by `rule mcp`, to every agent: `find_symbol`,
   `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview` and `change_impact`,
   answered by TypeScript 7's language server and Pyright, which install with `rule` from npm. Nothing
