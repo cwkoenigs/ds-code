@@ -1,7 +1,8 @@
-// Which agent runs the turns, and one session with it. Claude Code (@anthropic-ai/claude-agent-sdk)
-// or Cortex Code (@snowflake/cortex-agent-sdk, Snowflake's fork of the same SDK). Chosen as ds-next
-// chooses: --agent, then DS_AGENT, then `agent = "..."` in ~/.ds/config.toml, then whichever CLI is
-// on PATH, Cortex first. Nothing outside this file knows which SDK is loaded.
+// Which agent runs the turns, and one session with it. Claude Code (@anthropic-ai/claude-agent-sdk),
+// Cortex Code (@snowflake/cortex-agent-sdk, Snowflake's fork of the same SDK), or Codex (the codex
+// CLI's app-server, in codex.ts). Chosen as ds-next chooses: --agent, then DS_AGENT, then
+// `agent = "..."` in ~/.ds/config.toml, then whichever CLI is on PATH: Cortex, Claude, Codex.
+// Nothing outside this file and codex.ts knows which agent is running.
 import {randomUUID} from 'node:crypto';
 import {existsSync, readFileSync} from 'node:fs';
 import {homedir} from 'node:os';
@@ -13,11 +14,12 @@ import {type DsTool, runTool, systemPrompt as dsPrompt, tools as dsTools} from '
 import * as spec from '../spec.js';
 import {type AgentEvent, normalize} from './events.js';
 
-export type Backend = 'claude' | 'cortex';
-export const LABELS: Record<Backend, string> = {claude: 'Claude Code', cortex: 'Cortex Code'};
+export type Backend = 'claude' | 'cortex' | 'codex';
+export const BACKENDS: readonly Backend[] = ['cortex', 'claude', 'codex'];
+export const LABELS: Record<Backend, string> = {claude: 'Claude Code', cortex: 'Cortex Code', codex: 'Codex'};
 export const CONFIG = join(homedir(), '.ds', 'config.toml');
 
-const isBackend = (v: unknown): v is Backend => v === 'claude' || v === 'cortex';
+const isBackend = (v: unknown): v is Backend => BACKENDS.includes(v as Backend);
 
 function onPath(cmd: string): boolean {
 	const exts = process.platform === 'win32' ? (process.env['PATHEXT'] ?? '.EXE;.CMD;.BAT').split(';') : [''];
@@ -39,7 +41,7 @@ export function chooseBackend(flag?: string): Backend {
 		const x = v?.trim().toLowerCase();
 		if (isBackend(x)) return x;
 	}
-	return configured() ?? (onPath('cortex') ? 'cortex' : onPath('claude') ? 'claude' : 'cortex');
+	return configured() ?? BACKENDS.find(b => onPath(b)) ?? 'cortex';
 }
 
 // ── the session ──────────────────────────────────────────────────────────────
@@ -116,7 +118,7 @@ type Sdk = {
 	createSdkMcpServer: (o: {name: string; version?: string; tools: unknown[]}) => unknown;
 };
 
-export async function load(backend: Backend): Promise<Sdk> {
+export async function load(backend: Exclude<Backend, 'codex'>): Promise<Sdk> {
 	try {
 		return (backend === 'claude' ? await import('@anthropic-ai/claude-agent-sdk') : await import('@snowflake/cortex-agent-sdk/code')) as unknown as Sdk;
 	} catch (err) {
@@ -171,28 +173,29 @@ export function permissionGate(ask: Ask, readOnly: Set<string> = READ_ONLY) {
 	};
 }
 
-/** The `ds` MCP server, built with the loaded SDK's own helpers. */
+/** rule_spec, served beside ds-next's tools. */
+export const ruleSpecTool: DsTool = {
+	name: 'rule_spec',
+	description: 'Read the Rule terminal design system spec this terminal is drawn in. Pass a section, or omit it for everything.',
+	shape: {section: z.string().optional().describe(`one of ${SECTIONS.join(', ')}; omit for all`)},
+	readOnly: true,
+	run: args => {
+		const text = ruleSpec(typeof args['section'] === 'string' ? args['section'] : undefined);
+		return {text, error: text.startsWith('ERROR: ')};
+	},
+};
+
+/** The `ds` MCP server, built with the loaded SDK's own helpers: the tools given, and rule_spec. */
 export function dsServer(sdk: Sdk, tools: DsTool[] = []): unknown {
 	return sdk.createSdkMcpServer({
 		name: SERVER,
 		version: '0.1.0',
-		tools: [
-			...tools.map(t =>
-				sdk.tool(t.name, t.description, t.shape, async (args: Record<string, unknown>) => {
-					const r = await runTool(t, args);
-					return {content: [{type: 'text', text: r.text}], isError: r.error};
-				}),
-			),
-			sdk.tool(
-				'rule_spec',
-				'Read the Rule terminal design system spec this terminal is drawn in. Pass a section, or omit it for everything.',
-				{section: z.string().optional().describe(`one of ${SECTIONS.join(', ')}; omit for all`)},
-				async (args: {section?: string}) => {
-					const text = ruleSpec(args.section);
-					return {content: [{type: 'text', text}], isError: text.startsWith('ERROR: ')};
-				},
-			),
-		],
+		tools: [...tools, ruleSpecTool].map(t =>
+			sdk.tool(t.name, t.description, t.shape, async (args: Record<string, unknown>) => {
+				const r = await runTool(t, args);
+				return {content: [{type: 'text', text: r.text}], isError: r.error};
+			}),
+		),
 	});
 }
 
@@ -204,26 +207,38 @@ export function cortexCli(): string | undefined {
 	return onPath('cortex') ? 'cortex' : undefined;
 }
 
-export async function openSession(o: SessionOptions): Promise<AgentSession> {
-	if (o.backend === 'cortex' && !cortexCli()) {
-		const where = process.env['CORTEX_CODE_CLI_PATH'] ? `CORTEX_CODE_CLI_PATH (${process.env['CORTEX_CODE_CLI_PATH']}) does not exist` : 'cortex is not on your PATH';
-		throw new AgentUnavailable(`Cortex Code CLI not found: ${where}. Install it, or run with --agent claude.`);
-	}
-	const sdk = await load(o.backend);
-	// The canon and skills are read on first use, so a machine without them still gets a session.
+/** ds-next's tools for a working directory, and the canon and skills they read, if found. The canon and
+ *  skills are read on first use, so a machine without them still gets the tools, which say so. */
+export function dsToolsFor(cwd: string, connection?: string): {tools: DsTool[]; canon?: Canon; skills?: Skills} {
 	let canon: Canon | undefined;
 	let skills: Skills | undefined;
-	const ctx = {cwd: o.cwd, connection: o.connection, canon: () => (canon ??= new Canon()), skills: () => (skills ??= new Skills())};
+	const ctx = {cwd, connection, canon: () => (canon ??= new Canon()), skills: () => (skills ??= new Skills())};
 	try {
 		ctx.canon();
 		ctx.skills();
 	} catch {
 		// reported by the prompt and by each tool that needs them
 	}
-	const tools = dsTools(ctx);
-	const code = codetools.mcpServers(o.cwd);
-	const canUseTool = permissionGate(o.ask, readOnlyIds(tools, code));
-	const prompt = systemPrompt(o.cwd, canon, skills);
+	return {tools: dsTools(ctx), canon, skills};
+}
+
+/** What every session gets, whichever agent runs it: ds-next's tools (rule_spec is added where they're
+ *  served), the code graph and Serena when installed, the tools that never ask, and the system prompt. */
+export function sessionParts(cwd: string, connection?: string) {
+	const {tools, canon, skills} = dsToolsFor(cwd, connection);
+	const code = codetools.mcpServers(cwd);
+	return {tools, code, readOnly: readOnlyIds(tools, code), prompt: systemPrompt(cwd, canon, skills)};
+}
+
+export async function openSession(o: SessionOptions): Promise<AgentSession> {
+	if (o.backend === 'codex') return (await import('./codex.js')).openCodexSession(o);
+	if (o.backend === 'cortex' && !cortexCli()) {
+		const where = process.env['CORTEX_CODE_CLI_PATH'] ? `CORTEX_CODE_CLI_PATH (${process.env['CORTEX_CODE_CLI_PATH']}) does not exist` : 'cortex is not on your PATH';
+		throw new AgentUnavailable(`Cortex Code CLI not found: ${where}. Install it, or run with --agent claude or --agent codex.`);
+	}
+	const sdk = await load(o.backend);
+	const {tools, code, readOnly, prompt} = sessionParts(o.cwd, o.connection);
+	const canUseTool = permissionGate(o.ask, readOnly);
 	const abortController = new AbortController();
 	const common = {cwd: o.cwd, mcpServers: {[SERVER]: dsServer(sdk, tools), ...code}, canUseTool, model: o.model, effort: o.effort, resume: o.resume, abortController};
 	const options =

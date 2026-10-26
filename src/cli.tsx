@@ -6,9 +6,10 @@ import {writeFileSync} from 'node:fs';
 import {parseArgs} from 'node:util';
 import type {ReactNode} from 'react';
 import {AgentApp} from './agent/AgentApp.js';
-import {chooseBackend, openSession} from './agent/backend.js';
+import {type Backend, BACKENDS, chooseBackend, openSession} from './agent/backend.js';
 import {readDesk} from './agent/desk.js';
 import {LOOK} from './agent/looks.js';
+import {serveMcp} from './agent/mcp.js';
 import {Demo} from './demo/Demo.js';
 import {scripted} from './demo/scripted.js';
 import {build, buildRail} from './html.js';
@@ -31,7 +32,8 @@ const HELP = `rule: the Rule terminal design system, walked through, and the ds-
   rule spec [--json]       the spec as text, or as data
   rule html [-o FILE]      the tour as one web page, for reading on a phone
   rule demo                a live session with a faked agent
-  rule agent               a real session with Cortex Code or Claude Code
+  rule agent               a real session with Cortex Code, Claude Code or Codex
+  rule mcp                 serve ds-next's tools over MCP, for an agent run on its own
 
 Options
   --look rule|rail         how the agent, the demo and the screens are drawn: Rule (this design
@@ -44,8 +46,9 @@ Options
   --one-theme              show each mockup in --theme only, not dark and light
   --no-pause               print the tour straight through
   --from N                 start the tour at chapter N
-  --agent cortex|claude    which agent \`rule agent\` runs (default: $DS_AGENT, ~/.ds/config.toml,
-                           then whichever CLI is on PATH, Cortex first)
+  --agent cortex|claude|codex
+                           which agent \`rule agent\` runs (default: $DS_AGENT, ~/.ds/config.toml,
+                           then whichever CLI is on PATH: Cortex, Claude, Codex)
   --model NAME             the model for \`rule agent\`
   --connection NAME        the Snowflake connection for Cortex (default: the CLI's default)
   --effort LEVEL           reasoning effort for \`rule agent\` (low, medium, high)
@@ -169,7 +172,7 @@ async function main(argv: string[]): Promise<number> {
 			await live(theme, <Demo width={process.stdout.columns ?? GRID.designWidth} />);
 			return 0;
 		case 'agent': {
-			if (o.agent && o.agent !== 'cortex' && o.agent !== 'claude') throw new UsageError(`--agent must be cortex or claude, not "${o.agent}".`);
+			if (o.agent && !BACKENDS.includes(o.agent as Backend)) throw new UsageError(`--agent must be ${BACKENDS.join(', ')}, not "${o.agent}".`);
 			if (!interactive()) {
 				console.error('rule agent needs an interactive terminal: run it directly, not through a pipe.');
 				return 1;
@@ -183,6 +186,10 @@ async function main(argv: string[]): Promise<number> {
 			);
 			return 0;
 		}
+		case 'mcp':
+			// stdout carries the protocol from here on; nothing else may print to it.
+			await serveMcp(process.cwd(), o.connection);
+			return 0;
 		default:
 			throw new UsageError(`unknown command "${cmd}".`);
 	}

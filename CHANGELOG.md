@@ -9,6 +9,10 @@ the CLI started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Added
+- `rule agent --agent codex`: Codex as a third agent, through `codex app-server`, with the same
+  approvals and ds-next's tools; the turn footer shows its token count. (#2)
+- `rule mcp`: ds-next's tools and `rule_spec` as an MCP server, for Codex, Cortex Code or Claude Code
+  run on their own. The repo's Codex and Claude Code configs start it as `ds`. (#2)
 - `ARCHITECTURE.md`: how a turn flows, the rules the code keeps, every file and what it holds, and where
   to make a given change. A test fails when a file is added or removed without it. (#1)
 - `DECISIONS.md` records the decisions so far, local-001 to local-008. (#1)

@@ -50,16 +50,18 @@ npm 11 may warn that esbuild and fsevents have install scripts it hasn't run. Bo
 
 ## A real agent: `rule agent`
 
-`rule agent` runs a real session with Cortex Code or Claude Code, drawn in Rule. It picks the agent the way ds-next does: `--agent cortex|claude`, then `DS_AGENT`, then `agent = "..."` in `~/.ds/config.toml`, then whichever CLI is on your PATH, Cortex first.
+`rule agent` runs a real session with Cortex Code, Claude Code or Codex. It picks the agent the way ds-next does: `--agent cortex|claude|codex`, then `DS_AGENT`, then `agent = "..."` in `~/.ds/config.toml`, then whichever CLI is on your PATH: Cortex, Claude, Codex.
 
 ```sh
 rule agent                          # whichever agent ds-next would use
 rule agent --agent cortex --connection my-conn
 rule agent --agent claude --model claude-sonnet-5-5
+rule agent --agent codex            # or DS_AGENT=codex once, in your shell profile
 ```
 
 - **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does.
 - **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs.
+- **Codex** works with no CLI installed either: `rule` carries a pinned Codex (`@openai/codex`) and runs it as `codex app-server`, the protocol Codex's editor extensions use. It uses your normal Codex login (`~/.codex`). Codex asks before running a command that isn't a known read and before changing a file; those questions, and ds-next's writes, come to the same approval as with the other agents. Turns end with a token count, since Codex reports no cost. `CODEX_CLI_PATH` runs a different Codex binary instead.
 - **What you see:**
   - Thinking folds to `· Thought for 3s`.
   - Each tool shows as ▫ while it runs, then lands as ▪ with its result as a fact (`142 lines`, `+14 −1`).
@@ -69,6 +71,14 @@ rule agent --agent claude --model claude-sonnet-5-5
 - **Keys:** `esc` interrupts a turn, `ctrl-o` opens the last fold, and messages typed mid-turn are queued.
 - **Commands:** `/status`, `/model <name>`, `/clear` (new conversation) and `/exit` are local; any other `/command` goes to the agent.
 - **Stalls:** a turn silent for 10 minutes, outside an approval, is interrupted, as in ds-next. The next message carries on the same session.
+
+### ds-next's tools for any agent: `rule mcp`
+
+`rule mcp` serves the same tools as an MCP server over stdio, for Codex, Cortex Code or Claude Code run on their own. Each tool says whether it only reads, and the agent asks about the rest by its own rules. This repo's `.codex/config.toml` and `.mcp.json` already start it as `ds`. To have it everywhere in Codex:
+
+```sh
+codex mcp add ds -- rule mcp
+```
 
 ### ds-next's tools
 
@@ -153,12 +163,13 @@ Write the transcript once with `useTranscript()` and `<Transcript>`, built on In
 ## Checks
 
 ```sh
-npm test           # 78 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
+npm test           # 91 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
                    # while wrapping, the spec is complete, the demo, tour and agent session driven by
                    # keystrokes (the agent scripted) in both looks, Rail's tokens against ds-next's
-                   # ui_style.py, the permission gate, both SDKs build all 17 tools, the ds port on a
-                   # small canon, how the code graph and Serena attach, and that ARCHITECTURE.md
-                   # names every file
+                   # ui_style.py, the permission gate, both SDKs build all 17 tools, Codex against a
+                   # stand-in and end to end with the real app-server and a stand-in model, rule mcp,
+                   # the ds port on a small canon, how the code graph and Serena attach, and that
+                   # ARCHITECTURE.md names every file
 npm run typecheck
 ```
 

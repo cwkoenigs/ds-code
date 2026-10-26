@@ -161,3 +161,32 @@ from its git history. Each is dated when it was made.
 - **Validation:** Serena 2.1.0 answered `find_symbol` and `find_referencing_symbols` for `AgentApp`
   over MCP with the repo's config; `test/codetools.test.ts`.
 - **Review date:** each Serena upgrade.
+
+## local-009: Codex through its app-server, with ds-next's tools as dynamic tools
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** The owner's work computer has Cortex Code and Codex, not Claude Code. `rule agent`
+  needed Codex as a third agent, with the same approvals and the same ds-next tools.
+- **Options considered:**
+  1. **The Codex TypeScript SDK** (`@openai/codex-sdk`): it runs `codex exec`, which cannot ask before a
+     command runs or a file changes, and takes no tools from the client.
+  2. **`codex app-server`, ds tools over MCP from `rule mcp`**: approvals for commands and files work,
+     but a ds write would be approved by Codex's own rules, not ours.
+  3. **`codex app-server`, ds tools as dynamic tools**: chosen. Codex sends approval requests for
+     commands and file changes, and calls the ds tools back on `rule`, where they run in process and
+     go through the same gate as with the other agents.
+- **Decision:** `rule agent --agent codex` starts the pinned `@openai/codex` package's `codex
+  app-server` (or `CODEX_CLI_PATH`). Threads run with `approvalPolicy: untrusted` and the
+  `workspace-write` sandbox. A "no" cancels the command or the ds tool and ends the turn, as with the
+  other agents. Separately, `rule mcp` serves the same tools to Codex, Cortex or Claude Code run on
+  their own; when `rule agent` runs Codex, it switches that server off so the tools aren't served
+  twice.
+- **Consequences:** The app-server and its dynamic tools are marked experimental, so `@openai/codex`
+  is pinned and the tests run the real binary. Codex reports tokens, not dollars, so its turns end
+  with a token count. Upgrading Codex means re-running those tests first.
+- **Validation:** `test/codex.test.tsx`. The real app-server, its model calls going to a local
+  stand-in, played full turns: a ds tool called back on `rule`; a command asked about, then run on a
+  yes; on a no, the command was declined and the turn ended. Codex has not yet been run against a
+  real model.
+- **Review date:** each `@openai/codex` upgrade.

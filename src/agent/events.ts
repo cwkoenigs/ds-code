@@ -7,7 +7,7 @@ export type AgentEvent =
 	| {kind: 'thinking'; text: string}
 	| {kind: 'tool'; id: string; name: string; input: Record<string, unknown>}
 	| {kind: 'toolResult'; id: string; text: string; isError: boolean}
-	| {kind: 'result'; ok: boolean; durationMs: number; costUsd?: number; errors: string[]}
+	| {kind: 'result'; ok: boolean; durationMs: number; costUsd?: number; tokens?: number; errors: string[]} // Codex reports tokens, not cost
 	| {kind: 'error'; message: string}
 	| {kind: 'note'; text: string}; // a fact from the terminal itself, e.g. the code graph's refresh
 
