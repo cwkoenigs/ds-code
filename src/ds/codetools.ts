@@ -3,7 +3,7 @@
 //   graph   codebase-memory-mcp, a local index of symbols, calls and files (read-only `analysis` profile)
 //   lsp     Serena: find a symbol, its references, its declaration; its edit tools always ask
 //   search  `cortex search`: Snowflake docs, catalog objects and table details, read-only
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {basename, join} from 'node:path';
 import {pyReprValue, pySlice, resolvePath, which} from './py.js';
@@ -25,13 +25,28 @@ export const graphProject = (repo: string): string => resolvePath(repo).replace(
 
 export type StdioServer = {type: 'stdio'; command: string; args: string[]};
 
-/** Stdio MCP server configs for the agent, for the tools that are installed. */
+const serenaMajors = new Map<string, number>();
+
+/** Serena's major version from `serena --version` ("Serena 2.1.0"), read once per binary; 0 if unreadable. */
+export function serenaMajor(bin: string): number {
+	if (!serenaMajors.has(bin)) {
+		const r = spawnSync(bin, ['--version'], {encoding: 'utf8', timeout: 15_000});
+		serenaMajors.set(bin, Number(/(\d+)\.\d+/.exec(r.stdout ?? '')?.[1] ?? 0));
+	}
+	return serenaMajors.get(bin)!;
+}
+
+/** Stdio MCP server configs for the agent, for the tools that are installed. Serena 2 serves one REPL
+ *  tool unless asked for one tool per operation, which LSP_READ names; Serena 1 has no such flag. */
 export function mcpServers(cwd: string): Record<string, StdioServer> {
 	const servers: Record<string, StdioServer> = {};
 	const g = graphBin();
 	if (g) servers[GRAPH] = {type: 'stdio', command: g, args: ['--tool-profile=analysis']};
 	const s = serenaBin();
-	if (s) servers[LSP] = {type: 'stdio', command: s, args: ['start-mcp-server', '--context', 'ide', '--project', resolvePath(cwd), '--enable-web-dashboard', 'false', '--open-web-dashboard', 'false']};
+	if (s) {
+		const tools = serenaMajor(s) >= 2 ? ['--agent-interface', 'tools'] : [];
+		servers[LSP] = {type: 'stdio', command: s, args: ['start-mcp-server', '--context', 'ide', '--project', resolvePath(cwd), ...tools, '--enable-web-dashboard', 'false', '--open-web-dashboard', 'false']};
+	}
 	return servers;
 }
 

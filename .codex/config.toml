@@ -1,0 +1,15 @@
+# Codex: the code graph and Serena for this repo. Codex loads a project's own config only after you
+# trust the project (it asks on first run). Both tools are installed separately: see ARCHITECTURE.md.
+
+# codebase-memory-mcp: callers, callees, symbols and files, from its own index. The analysis profile
+# serves reads only; `npm run index` builds or refreshes the index.
+[mcp_servers.graph]
+command = "codebase-memory-mcp"
+args = ["--tool-profile=analysis"]
+startup_timeout_sec = 30
+
+# Serena: definitions, references and diagnostics from the TypeScript language server.
+[mcp_servers.lsp]
+command = "serena"
+args = ["start-mcp-server", "--context", "codex", "--project", ".", "--enable-web-dashboard", "false", "--open-web-dashboard", "false"]
+startup_timeout_sec = 60

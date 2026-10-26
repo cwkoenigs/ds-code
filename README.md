@@ -126,24 +126,14 @@ Everything else is shared: the agent and its tools, the queue, `esc`, the watchd
 
 **Fixed along the way, in both looks:** the box could send an older line. Keys go to the handler from the last render, so when `enter` came before React had redrawn after the previous key (fast typing, a paste, a busy machine), it sent what the line held before. The approval and the dialog had the same fault: a quick `y` `enter` could read as an empty answer. Each now keeps what was typed where every key reads it at once.
 
-## What's where
+## What's where, and what changed
 
-| File | Holds |
-|---|---|
-| `src/tokens.ts` | Colour roles (dark, light, ANSI-16), glyphs, grid, spinner, verbs, mascot: ds-next's [`docs/design-system-rule/tokens.json`](https://github.com/cwkoenigs/ds-next/blob/main/docs/design-system-rule/tokens.json) typed |
-| `src/spec.ts` | The spec as data: assumptions, the differences from Canopy, principles, colour, glyphs, grid, case, motion, code map, screens, known gaps |
-| `src/text.ts` | The row model: a line is a list of spans with colour roles, so tests can measure every cell |
-| `src/builders.ts` | Every message type as rows: `turnRule`, `you`, `agent`, `tool`, `result`, `thinking`, `thought`, `outcome`, `facts`, `frame`, `dialog`, `inputBox`, `statusRow`, `popupRows`, `banner` |
-| `src/components/` | The design system as Ink components: static ones in `rule.tsx`, live ones in `live.tsx` (`Working`, `InputBox`, `Footing`, `DialogPicker`, `useLineEditor`), the write-once transcript, and `LiveTurn` |
-| `src/screens.ts` | The seven screens and the spec page's mockups |
-| `src/tour/`, `src/demo/` | The walkthrough and the faked live session |
-| `src/agent/` | `rule agent`: the backend choice and session (`backend.ts`), SDK messages reduced to a few events (`events.ts`), how tool calls read (`present.ts`), Markdown as rows (`markdown.ts`), the two looks (`looks.tsx`: everything that differs between Rule and Rail), what this machine has for the banner and toolbar (`desk.ts`), and the app (`AgentApp.tsx`) |
-| `src/rail/` | Rail: `tokens.ts` (ds-next's `ui_style.py` values), `builders.ts` (its line builders, frames, banner, box, toolbar, menu, approval), `screens.ts` (the ten screens) |
-| `src/demo/scripted.ts` | The scripted agent behind `rule demo --look rail` |
-| `src/ds/` | ds-next's knowledge base and tools, ported: `kb.ts` (canon, skills), `scaffold.ts` (new projects, adopting, blocks), `reconcile.ts`, `code.ts`, `codetools.ts`, `tools.ts` (the 17 agent tools and the system prompt), `py.ts` (the bits of Python behaviour the files depend on) |
-| `python/code_cut.py` | ds-next's code-cutting functions, unchanged, for `code_get` and `code_add` |
-| `test/parity/` | The comparison with ds-next's Python |
-| `src/html.ts`, `src/html-page.ts` | `rule html`: the tour page, and with `--look rail` the Rail screens page |
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): how a turn flows, the rules the code keeps, every file and what
+  it holds, where to make a given change, and the code graph and Serena setup for Codex, Claude Code
+  and Cortex.
+- [`DECISIONS.md`](DECISIONS.md): the decisions so far and the options weighed.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed, by pull request.
+- [`AGENTS.md`](AGENTS.md): what any agent working here reads first.
 
 ## Using the components
 
@@ -163,11 +153,12 @@ Write the transcript once with `useTranscript()` and `<Transcript>`, built on In
 ## Checks
 
 ```sh
-npm test           # 74 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
+npm test           # 78 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
                    # while wrapping, the spec is complete, the demo, tour and agent session driven by
                    # keystrokes (the agent scripted) in both looks, Rail's tokens against ds-next's
-                   # ui_style.py, the permission gate, both SDKs build all 17 tools, and the ds port on
-                   # a small canon (render, write, reconcile, blocks, code, tools)
+                   # ui_style.py, the permission gate, both SDKs build all 17 tools, the ds port on a
+                   # small canon, how the code graph and Serena attach, and that ARCHITECTURE.md
+                   # names every file
 npm run typecheck
 ```
 
