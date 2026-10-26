@@ -1,61 +1,10 @@
-// Code intelligence for the agent: a code graph, a language server, and Snowflake search. A port of
-// ds-next's codetools.py. Each is optional: missing tools are simply not offered; nothing installs.
-//   graph   codebase-memory-mcp, a local index of symbols, calls and files (read-only `analysis` profile)
-//   lsp     Serena: find a symbol, its references, its declaration; its edit tools always ask
-//   search  `cortex search`: Snowflake docs, catalog objects and table details, read-only
-import {spawn, spawnSync} from 'node:child_process';
-import {existsSync} from 'node:fs';
-import {basename, join} from 'node:path';
-import {pyReprValue, pySlice, resolvePath, which} from './py.js';
+// Snowflake search for the agent, through `cortex search`: docs, catalog objects and table details,
+// read-only. A port of the part of ds-next's codetools.py that remains here; the code graph and Serena
+// it also attached are replaced by the code tools in src/code/, which need nothing installed.
+import {spawn} from 'node:child_process';
+import {pyReprValue, pySlice, which} from './py.js';
 
-export const GRAPH = 'graph';
-export const LSP = 'lsp';
-
-// codebase-memory-mcp --tool-profile=analysis serves only these, all reads.
-const GRAPH_READ = ['search_graph', 'query_graph', 'trace_path', 'get_code_snippet', 'get_file_outline', 'get_graph_schema', 'compare_graphs', 'get_architecture', 'search_code', 'list_projects', 'index_status', 'check_index_coverage', 'detect_changes'];
-// Serena tools annotated readOnly; everything else it offers edits files or memories.
-const LSP_READ = ['search_for_pattern', 'get_symbols_overview', 'find_symbol', 'find_referencing_symbols', 'find_implementations', 'find_declaration', 'get_diagnostics_for_file', 'read_memory', 'list_memories', 'initial_instructions'];
-
-export const graphBin = () => which('codebase-memory-mcp');
-export const serenaBin = () => which('serena');
 export const cortexBin = () => which('cortex');
-
-/** The name codebase-memory-mcp gives a repository: its absolute path with / as -. */
-export const graphProject = (repo: string): string => resolvePath(repo).replace(/^\/+|\/+$/g, '').replaceAll('/', '-');
-
-export type StdioServer = {type: 'stdio'; command: string; args: string[]};
-
-const serenaMajors = new Map<string, number>();
-
-/** Serena's major version from `serena --version` ("Serena 2.1.0"), read once per binary; 0 if unreadable. */
-export function serenaMajor(bin: string): number {
-	if (!serenaMajors.has(bin)) {
-		const r = spawnSync(bin, ['--version'], {encoding: 'utf8', timeout: 15_000});
-		serenaMajors.set(bin, Number(/(\d+)\.\d+/.exec(r.stdout ?? '')?.[1] ?? 0));
-	}
-	return serenaMajors.get(bin)!;
-}
-
-/** Stdio MCP server configs for the agent, for the tools that are installed. Serena 2 serves one REPL
- *  tool unless asked for one tool per operation, which LSP_READ names; Serena 1 has no such flag. */
-export function mcpServers(cwd: string): Record<string, StdioServer> {
-	const servers: Record<string, StdioServer> = {};
-	const g = graphBin();
-	if (g) servers[GRAPH] = {type: 'stdio', command: g, args: ['--tool-profile=analysis']};
-	const s = serenaBin();
-	if (s) {
-		const tools = serenaMajor(s) >= 2 ? ['--agent-interface', 'tools'] : [];
-		servers[LSP] = {type: 'stdio', command: s, args: ['start-mcp-server', '--context', 'ide', '--project', resolvePath(cwd), ...tools, '--enable-web-dashboard', 'false', '--open-web-dashboard', 'false']};
-	}
-	return servers;
-}
-
-export function readOnlyIds(servers: Record<string, unknown>): Set<string> {
-	const ids = new Set<string>();
-	if (GRAPH in servers) GRAPH_READ.forEach(t => ids.add(`mcp__${GRAPH}__${t}`));
-	if (LSP in servers) LSP_READ.forEach(t => ids.add(`mcp__${LSP}__${t}`));
-	return ids;
-}
 
 /** Run a command to the end without blocking: stdout, stderr, exit code, or timedOut. */
 function run(cmd: string, args: string[], timeoutMs: number): Promise<{stdout: string; stderr: string; code: number | null; timedOut: boolean}> {
@@ -79,22 +28,6 @@ function run(cmd: string, args: string[], timeoutMs: number): Promise<{stdout: s
 			res({stdout, stderr, code, timedOut});
 		});
 	});
-}
-
-/** Build or refresh the graph for repo. Returns a one-line summary; never throws. */
-export async function index(repoIn: string, timeout = 300): Promise<string> {
-	const g = graphBin();
-	if (!g) return 'graph: codebase-memory-mcp not installed';
-	const repo = resolvePath(repoIn);
-	if (!existsSync(join(repo, '.git'))) return `graph: ${basename(repo)} is not a git repository, not indexed`;
-	const r = await run(g, ['cli', '--quiet', 'index_repository', JSON.stringify({repo_path: repo})], timeout * 1000);
-	if (r.timedOut) return `graph: indexing ${basename(repo)} took longer than ${timeout}s`;
-	try {
-		const data = JSON.parse(r.stdout) as Record<string, unknown>;
-		return `graph: ${data['nodes'] ?? '?'} symbols, ${data['edges'] ?? '?'} edges in ${data['project'] ?? basename(repo)}`;
-	} catch {
-		return `graph: indexing ${basename(repo)} failed: ${pySlice((r.stderr || r.stdout).trim(), 200)}`;
-	}
 }
 
 /** [text, isError] from `cortex search <kind> <query>`. */

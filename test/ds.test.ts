@@ -197,7 +197,7 @@ describe('the ds tools', () => {
 	it('asks before writing, never before reading', () => {
 		const {tmp, canon, skills} = setup();
 		const t = tools({cwd: tmp, canon: () => canon, skills: () => skills});
-		const ro = readOnlyIds(t, {});
+		const ro = readOnlyIds(t);
 		expect(t.map(x => x.name)).toContain('adopt_repo'); // defined but not registered in ds-next's agent.py
 		for (const id of ['canon_list', 'canon_read', 'code_get', 'scaffold_get', 'rule_spec']) expect(ro.has(`mcp__ds__${id}`)).toBe(true);
 		for (const id of ['scaffold_project', 'adopt_repo', 'block_add', 'code_add', 'capture']) expect(ro.has(`mcp__ds__${id}`)).toBe(false);

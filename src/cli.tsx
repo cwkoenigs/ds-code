@@ -33,7 +33,7 @@ const HELP = `rule: the Rule terminal design system, walked through, and the ds-
   rule html [-o FILE]      the tour as one web page, for reading on a phone
   rule demo                a live session with a faked agent
   rule agent               a real session with Cortex Code, Claude Code or Codex
-  rule mcp                 serve ds-next's tools over MCP, for an agent run on its own
+  rule mcp                 serve ds-next's tools and the code tools over MCP, for an agent run on its own
 
 Options
   --look rule|rail         how the agent, the demo and the screens are drawn: Rule (this design

@@ -1,22 +1,7 @@
-# Codex: ds-next's tools, the code graph and Serena for this repo. Codex loads a project's own config
-# only after you trust the project (it asks on first run). See ARCHITECTURE.md for installing them.
-
-# rule mcp: the canon, skills, scaffolds, blocks and reconcile, as ds-next's tools. Needs `rule` on
-# your PATH (`npm link`). Each tool says whether it only reads; Codex asks about the rest.
+# Codex: ds-next's tools and the code tools for this repo, from `rule mcp`. Codex loads a project's own
+# config only after you trust the project (it asks on first run). Needs `rule` on your PATH (`npm link`).
+# Each tool says whether it only reads; Codex asks about the rest.
 [mcp_servers.ds]
 command = "rule"
 args = ["mcp"]
 startup_timeout_sec = 30
-
-# codebase-memory-mcp: callers, callees, symbols and files, from its own index. The analysis profile
-# serves reads only; `npm run index` builds or refreshes the index.
-[mcp_servers.graph]
-command = "codebase-memory-mcp"
-args = ["--tool-profile=analysis"]
-startup_timeout_sec = 30
-
-# Serena: definitions, references and diagnostics from the TypeScript language server.
-[mcp_servers.lsp]
-command = "serena"
-args = ["start-mcp-server", "--context", "codex", "--project", ".", "--enable-web-dashboard", "false", "--open-web-dashboard", "false"]
-startup_timeout_sec = 60

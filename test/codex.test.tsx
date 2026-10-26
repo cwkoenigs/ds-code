@@ -3,7 +3,7 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {render} from 'ink-testing-library';
-import {chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import {chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
@@ -85,7 +85,7 @@ describe.skipIf(process.platform === 'win32')('Codex through its app-server', ()
 		expect(thread!.params).toMatchObject({approvalPolicy: 'untrusted', sandbox: 'workspace-write', config: {mcp_servers: {ds: {enabled: false}}}}); // no second copy of the tools
 		expect(thread!.params!['developerInstructions']).toContain('rule_spec');
 		const names = (thread!.params!['dynamicTools'] as {name: string}[]).map(t => t.name);
-		expect(names).toHaveLength(18);
+		expect(names).toHaveLength(26);
 		expect(names).toEqual(expect.arrayContaining(['canon_read', 'scaffold_project', 'rule_spec']));
 		const [turn] = received('turn/start');
 		expect(turn!.params!['input']).toEqual([{type: 'text', text: 'run the tests', text_elements: []}]);
@@ -176,7 +176,7 @@ describe('rule mcp', () => {
 		const c = new Client({name: 'test', version: '0'});
 		await c.connect(client);
 		const {tools} = await c.listTools();
-		expect(tools).toHaveLength(18);
+		expect(tools).toHaveLength(26);
 		const hint = (n: string) => tools.find(t => t.name === n)!.annotations?.readOnlyHint;
 		expect([hint('canon_read'), hint('rule_spec'), hint('scaffold_project'), hint('capture')]).toEqual([true, true, false, false]);
 		const r = await c.callTool({name: 'rule_spec', arguments: {section: 'principles'}});
@@ -187,13 +187,12 @@ describe('rule mcp', () => {
 });
 
 /** A turn through the real, pinned app-server, its model calls going to a stand-in that asks for one tool. */
-async function realTurn(call: {name: string; arguments: Record<string, unknown>}, answer: Answer) {
+async function realTurn(call: {name: string; arguments: Record<string, unknown>}, answer: Answer, cwd = mkdtempSync(join(tmpdir(), 'codex-cwd-'))) {
 	delete process.env['CODEX_CLI_PATH'];
 	const model = await fakeModel(call);
 	const home = mkdtempSync(join(tmpdir(), 'codex-home-'));
 	writeFileSync(join(home, 'config.toml'), modelConfig(model.url));
 	process.env['CODEX_HOME'] = home;
-	const cwd = mkdtempSync(join(tmpdir(), 'codex-cwd-'));
 	const events: AgentEvent[] = [];
 	const asked: string[] = [];
 	const s = await openSession({backend: 'codex', cwd, ask: async (name, input) => (asked.push(`${name} ${JSON.stringify(input)}`), answer), onEvent: e => events.push(e), onClose: () => {}});
@@ -212,6 +211,16 @@ describe('Codex end to end: the real app-server, a stand-in model', () => {
 		expect(asked).toEqual([]); // rule_spec only reads
 		expect(outputs[0]).toContain('The grid shows'); // what the model got back
 		expect(events.at(-1)).toMatchObject({kind: 'result', ok: true, tokens: 120});
+	}, 60_000);
+
+	it('calls a code tool, which asks the TypeScript language server, without asking the person', async () => {
+		const cwd = mkdtempSync(join(tmpdir(), 'codex-cwd-'));
+		cpSync(join(import.meta.dirname, 'fixtures', 'code-ts'), cwd, {recursive: true});
+		const {events, asked, outputs} = await realTurn({name: 'file_symbols', arguments: {path: 'src/greet.ts'}}, 'yes', cwd);
+		expect(events.map(e => e.kind)).toEqual(['init', 'tool', 'toolResult', 'text', 'result']);
+		expect(events[1]).toMatchObject({name: 'mcp__code__file_symbols', input: {path: 'src/greet.ts'}});
+		expect(asked).toEqual([]);
+		expect(outputs[0]).toBe('src/greet.ts: 2 symbols\n  1-3  function greet\n  5-7  function shout');
 	}, 60_000);
 
 	it.skipIf(process.platform === 'win32')('asks before a command, runs it on a yes', async () => {
