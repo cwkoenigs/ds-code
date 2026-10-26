@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "graph": {
+      "command": "codebase-memory-mcp",
+      "args": ["--tool-profile=analysis"]
+    },
+    "lsp": {
+      "command": "serena",
+      "args": ["start-mcp-server", "--context", "claude-code", "--project", ".", "--enable-web-dashboard", "false", "--open-web-dashboard", "false"]
+    }
+  }
+}
