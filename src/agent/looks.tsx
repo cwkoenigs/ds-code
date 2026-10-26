@@ -42,7 +42,10 @@ export type Status = {
 	desk: Desk;
 };
 
-export type Ending = {n: number; tools: number; durationMs: number; costUsd?: number; failure?: string};
+export type Ending = {n: number; tools: number; durationMs: number; costUsd?: number; tokens?: number; failure?: string};
+
+/** 45230 → 45.2k tokens: Codex's measure of a turn, where the others give dollars. */
+export const tokenCount = (n: number): string => `${n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n} tokens`;
 export type Kind = 'ok' | 'warn' | 'err';
 export type Step = {kind: 'start'; connected: boolean; label: string} | {kind: 'thinking'} | {kind: 'tool'; name: string} | {kind: 'toolResult'};
 export type ApprovalProps = {name: string; input: Record<string, unknown>; cwd: string; w: number; status: Status; onAnswer: (a: Answer, typed: string) => void};
@@ -148,6 +151,7 @@ export const RULE: AgentLook = {
 	ending: (e, w) => {
 		const facts = [`${e.tools} tools`, `${(e.durationMs / 1000).toFixed(1)}s`];
 		if (e.costUsd !== undefined) facts.push(`$${e.costUsd.toFixed(4)}`);
+		else if (e.tokens) facts.push(tokenCount(e.tokens));
 		return [[], ...(e.failure ? ruleOutcome('err', 'turn failed', e.failure, w) : []), b.facts(...facts), []];
 	},
 	interrupted: (_secs, w) => [[], ...ruleOutcome('warn', 'interrupted', 'tell the agent what to do instead', w), []],
@@ -290,6 +294,7 @@ export const RAIL: AgentLook = {
 	ending: (e, w) => {
 		const facts = [`#${e.n}`, `${e.tools} tool call${e.tools === 1 ? '' : 's'}`, `${(e.durationMs / 1000).toFixed(1)}s`];
 		if (e.costUsd) facts.push(`$${e.costUsd.toFixed(4)}`);
+		else if (e.tokens) facts.push(tokenCount(e.tokens));
 		const failed = e.failure ? [truncate(r.result(e.failure, 0, {error: true}), w)] : [];
 		return [...failed, r.footer(...facts), []];
 	},

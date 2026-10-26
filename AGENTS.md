@@ -7,6 +7,7 @@ The ds-next agent terminal in Node, drawn in Rule or Rail, for the team on Mac a
 - Lint: `npm run typecheck`
 - Before changing anything, read `.ds/manifest.toml`: it says which standards are in force here.
 - The team's knowledge base is served by `ds-next mcp` (canon_list, canon_read, code_search, code_get, code_add) for any agent that can reach it.
+- `rule mcp` serves all of ds-next's agent tools, ported here, plus `rule_spec`; this repo's Codex and Claude Code configs start it as `ds`.
 
 ## Directory map
 
@@ -48,7 +49,8 @@ Every change, by a person or an agent:
 
 ## Code tools
 
-When `graph` (codebase-memory-mcp) and `lsp` (Serena) are available, use them before text search:
+`ds` (`rule mcp`) answers from the canon: standards, scaffolds, blocks, accepted code. When `graph`
+(codebase-memory-mcp) and `lsp` (Serena) are available, use them before text search:
 `find_symbol` and `find_referencing_symbols` for definitions and callers, `trace_path` and
 `get_architecture` for how parts connect. Run `npm run index` if the graph is stale.
 

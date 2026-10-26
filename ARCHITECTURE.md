@@ -11,12 +11,12 @@ flowchart TD
   key[keys] --> editor["useLineEditor<br/>components/live.tsx"]
   editor --> app["AgentApp<br/>agent/AgentApp.tsx"]
   app -- "first message" --> session["openSession<br/>agent/backend.ts"]
-  session --> sdk["Claude Agent SDK or<br/>Cortex Agent SDK"]
-  sdk -- "SDK messages" --> events["normalize<br/>agent/events.ts"]
+  session --> sdk["Claude Agent SDK, Cortex Agent SDK,<br/>or Codex's app-server (agent/codex.ts)"]
+  sdk -- "messages" --> events["normalize (agent/events.ts),<br/>or codex.ts for Codex"]
   events -- "AgentEvent" --> app
   sdk -- "may I run this?" --> gate["permissionGate<br/>agent/backend.ts"]
   gate -- "reads: yes at once<br/>everything else" --> app
-  sdk -- "ds tool call" --> server["ds MCP server, in process<br/>agent/backend.ts dsServer"]
+  sdk -- "ds tool call" --> server["ds tools, in process: an MCP server for the SDKs,<br/>dynamic tools for Codex"]
   server --> tools["ds-next's tools<br/>ds/tools.ts"]
   tools --> kb["canon, skills, scaffolds,<br/>reconcile, code<br/>ds/*.ts"]
   kb --> disk[("canon and skills-os<br/>on disk")]
@@ -29,14 +29,17 @@ flowchart TD
 1. **You type.** `useLineEditor` keeps the line and the `/` menu. Enter hands the line to `AgentApp.run`.
 2. **Local or agent.** `/status`, `/model`, `/last`, `/clear`, `/help`, `/exit` and `?` are answered
    locally. Anything else, unknown `/commands` included, goes to the agent.
-3. **The session.** The first message opens a session (`openSession`): it picks the SDK, attaches the
-   in-process `ds` MCP server (ds-next's 17 tools plus `rule_spec`) and the code graph and Serena when
-   they're installed, and starts streaming. Later messages reuse it; after a crash or a stall the
-   next message resumes it.
-4. **Events.** Both SDKs emit the same message shapes; `normalize` reduces each one to a few
-   `AgentEvent`s: init, thinking, text, tool, toolResult, result, error, note.
-5. **Asking.** Before a tool runs, the SDK calls `permissionGate`. Reads in the allowlist pass at once;
-   anything else goes to `AgentApp.askPerson`, one question at a time, and the look draws the question.
+3. **The session.** The first message opens a session (`openSession`). It picks the agent, serves it
+   ds-next's 17 tools plus `rule_spec` in process, attaches the code graph and Serena when they're
+   installed, and starts streaming. The Claude and Cortex SDKs take the tools as an MCP server; Codex
+   runs as `codex app-server` and takes them as dynamic tools (`agent/codex.ts`). Later messages
+   reuse the session; after a crash or a stall the next message resumes it.
+4. **Events.** The two SDKs emit the same message shapes, which `normalize` reduces to a few
+   `AgentEvent`s: init, thinking, text, tool, toolResult, result, error, note. `codex.ts` reduces
+   Codex's thread items and turn notifications to the same events.
+5. **Asking.** Before a tool runs, the SDK calls `permissionGate`; Codex sends an approval request,
+   or calls the ds tool, and `codex.ts` puts it through the same gate. Reads in the allowlist pass at
+   once; anything else goes to `AgentApp.askPerson`, one question at a time, and the look draws it.
 6. **Drawing.** For each event `AgentApp` asks the look for rows (`text`, `toolStart`, `toolEnd`,
    `ending`...) and prints them to the transcript. Only the running tools, the spinner and the box
    redraw.
@@ -58,8 +61,8 @@ flowchart TD
   terminal's width, as ds-next does.
 - **Keys read state from refs.** A key can reach a handler from an older render. The line editor, the
   dialog and the Rail approval keep what was typed in a ref every key updates at once.
-- **One file knows the SDK.** Only `agent/backend.ts` loads an SDK; the rest sees `AgentEvent`s and an
-  `AgentSession`.
+- **Two files know the agent.** `agent/backend.ts` loads the Claude or Cortex SDK; `agent/codex.ts`
+  drives Codex. The rest sees `AgentEvent`s and an `AgentSession`.
 - **The ds tools are ds-next's.** `ds/` is a port of ds-next's Python with the same tool names,
   descriptions, arguments and outputs. `test/parity/run.sh` runs both through 229 steps on a real
   canon and compares everything. Reads never ask; writes always do.
@@ -113,7 +116,9 @@ flowchart TD
 | File | Holds |
 |---|---|
 | `src/agent/AgentApp.tsx` | `rule agent`: the session, local commands, the queue, interrupts, the stall watchdog, approvals one at a time |
-| `src/agent/backend.ts` | Which agent (`chooseBackend`), loading its SDK, the permission gate, the in-process `ds` server, the system prompt, `openSession` |
+| `src/agent/backend.ts` | Which agent (`chooseBackend`), loading its SDK, the permission gate, the in-process `ds` server, `rule_spec`, the system prompt, `openSession` |
+| `src/agent/codex.ts` | Codex: `codex app-server` over JSON-RPC, ds-next's tools as dynamic tools, approvals through the gate, Codex's items as `AgentEvent`s |
+| `src/agent/mcp.ts` | `rule mcp`: ds-next's tools and `rule_spec` as a stdio MCP server, for an agent run on its own |
 | `src/agent/events.ts` | `AgentEvent` and `normalize`: SDK messages from either agent reduced to a few events |
 | `src/agent/looks.tsx` | `AgentLook` and its two implementations, `RULE` and `RAIL`: everything that differs between the looks |
 | `src/agent/markdown.ts` | Agent Markdown as lines (`markdownLines`), and Rule's framing of it (`agentRows`) |
@@ -157,6 +162,9 @@ flowchart TD
 | `test/rail.test.tsx` | Rail's tokens against ds-next's `ui_style.py`, its grid, its screens and page, `rule agent` and its demo in Rail |
 | `test/ds.test.ts` | The ds port on a small canon: render, write, reconcile, blocks, code, tools |
 | `test/codetools.test.ts` | How the code graph and Serena are attached, with fake binaries |
+| `test/codex.test.tsx` | Codex against a stand-in app-server, drawn in Rail, and end to end with the real app-server and a stand-in model; `rule mcp` |
+| `test/fixtures/fake-codex.mjs` | A stand-in for `codex app-server`: one scripted turn with a ds tool call and a command approval |
+| `test/fixtures/fake-model.ts` | A stand-in for the model API Codex calls, so the real app-server plays a turn with no account |
 | `test/architecture.test.ts` | That this page names every file, and names no file that is gone |
 | `test/helpers.ts` | Shared: waiting for a frame, waiting for the input hooks, a scripted agent session |
 | `test/parity/run.sh` | The parity check with ds-next's Python (needs a ds-next checkout, the canon and skills-os) |
@@ -178,7 +186,9 @@ flowchart TD
 | Which tools never ask | `READ_ONLY` and `readOnlyIds` in `src/agent/backend.ts`; a ds tool's `readOnly` in `src/ds/tools.ts`; graph and Serena reads in `src/ds/codetools.ts` |
 | An agent tool | `src/ds/tools.ts` (port it from ds-next first; add it to `test/parity/` when it reads the canon) |
 | What the agent is told | `systemPrompt` in `src/agent/backend.ts` and `src/ds/tools.ts` |
-| A new agent (SDK) | `src/agent/backend.ts` (`Backend`, `chooseBackend`, `load`, `openSession`), then `normalize` in `src/agent/events.ts` if its messages differ |
+| A new agent (SDK) | `src/agent/backend.ts` (`Backend`, `chooseBackend`, `load`, `openSession`), then `normalize` in `src/agent/events.ts` if its messages differ; `src/agent/codex.ts` is the pattern for an agent with its own protocol |
+| What Codex may do without asking | The thread's `approvalPolicy` and `sandbox` in `src/agent/codex.ts` |
+| What `rule mcp` serves | `src/agent/mcp.ts`; its tools are the same list `rule agent` serves |
 | The banner's facts | `banner` in each look in `src/agent/looks.tsx`; what the machine has in `src/agent/desk.ts` |
 | A CLI command or flag | `src/cli.tsx` and its `HELP` text |
 | Rule's tour | `src/tour/chapters.tsx`, its data in `src/spec.ts`, its screens in `src/screens.ts` |
@@ -187,7 +197,8 @@ flowchart TD
 
 Two optional tools give an agent working in this repo more than text search. `rule agent` attaches
 both when they're on your PATH; for Codex, Claude Code and Cortex sessions opened in this folder, the
-repo carries their config.
+repo carries their config, along with `ds`: ds-next's tools from `rule mcp` (needs `rule` on your
+PATH, from `npm link`).
 
 | Tool | What it answers | Install |
 |---|---|---|
@@ -195,7 +206,8 @@ repo carries their config.
 | [Serena](https://github.com/oraios/serena) | Definitions, references, implementations, diagnostics, from the TypeScript language server | `uv tool install serena-agent==2.1.0` |
 
 - **Codex** reads `.codex/config.toml`, once you trust the project (Codex asks the first time you open
-  it). Start Codex in this folder. `codex mcp list` shows `graph` and `lsp`.
+  it). Start Codex in this folder. `codex mcp list` shows `ds`, `graph` and `lsp`. When `rule agent`
+  runs Codex, it switches the `ds` server off, since it serves the same tools itself.
 - **Claude Code** reads `.mcp.json` and asks once before starting each server.
 - **Cortex Code** isn't checked yet. Its SDK is a fork of Claude Code's and reads Claude Code's own
   config (`~/.claude.json`) besides Cortex's `mcp.json`, so it may pick up `.mcp.json` too. Check that

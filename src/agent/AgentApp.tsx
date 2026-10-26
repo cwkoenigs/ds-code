@@ -166,7 +166,7 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 				case 'result': {
 					if (e.costUsd) stats.current.cost += e.costUsd;
 					const failure = !e.ok && !interrupted.current ? e.errors.join('; ') || 'the agent reported an error' : undefined;
-					printRows(look.ending({n: stats.current.turns, tools: stats.current.turnTools, durationMs: e.durationMs, costUsd: e.costUsd, failure}, w));
+					printRows(look.ending({n: stats.current.turns, tools: stats.current.turnTools, durationMs: e.durationMs, costUsd: e.costUsd, tokens: e.tokens, failure}, w));
 					last.current = 'none';
 					endTurn();
 					return;

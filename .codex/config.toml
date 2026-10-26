@@ -1,5 +1,12 @@
-# Codex: the code graph and Serena for this repo. Codex loads a project's own config only after you
-# trust the project (it asks on first run). Both tools are installed separately: see ARCHITECTURE.md.
+# Codex: ds-next's tools, the code graph and Serena for this repo. Codex loads a project's own config
+# only after you trust the project (it asks on first run). See ARCHITECTURE.md for installing them.
+
+# rule mcp: the canon, skills, scaffolds, blocks and reconcile, as ds-next's tools. Needs `rule` on
+# your PATH (`npm link`). Each tool says whether it only reads; Codex asks about the rest.
+[mcp_servers.ds]
+command = "rule"
+args = ["mcp"]
+startup_timeout_sec = 30
 
 # codebase-memory-mcp: callers, callees, symbols and files, from its own index. The analysis profile
 # serves reads only; `npm run index` builds or refreshes the index.
