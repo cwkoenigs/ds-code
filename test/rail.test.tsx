@@ -3,7 +3,8 @@
 import {renderToString} from 'ink';
 import {render} from 'ink-testing-library';
 import {existsSync, readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
+import {homedir} from 'node:os';
+import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {AgentApp, type Opener} from '../src/agent/AgentApp.js';
 import {argSummary, describePermission, RAIL, railName} from '../src/agent/looks.js';
@@ -17,7 +18,8 @@ import {plain, s, width} from '../src/text.js';
 import {RailScreen} from '../src/tour/rail.js';
 import {ENTER, fake, ready, tick, until} from './helpers.js';
 
-const UI_STYLE = fileURLToPath(new URL('../../../../src/ds_next/ui_style.py', import.meta.url)); // ds-next's own, when this sits in ds-next
+/** ds-next's own ui_style.py, from a ds-next checkout: DS_NEXT, else ~/Developer/ds-next. Without one, these checks skip. */
+const UI_STYLE = join(process.env['DS_NEXT'] ?? join(homedir(), 'Developer', 'ds-next'), 'src', 'ds_next', 'ui_style.py');
 const CTRL_C = '\u0003';
 
 describe("Rail's tokens are ds-next's", () => {

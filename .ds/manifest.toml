@@ -1,0 +1,10 @@
+[repo]
+name = "rule-cli"
+tags = ["cli", "cortex", "mcp", "node", "package", "terminal", "typescript"]
+created = "2026-10-26"
+adopted = "2026-10-26"
+test_cmd = "npm test"
+lint_cmd = "npm run typecheck"
+ds_version = "0.1.0"
+canon = "~/Developer/canon"
+canon_index = "2026-10-20"

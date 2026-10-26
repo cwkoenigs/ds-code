@@ -1,16 +1,18 @@
-# rule-cli (Node)
+# rule-cli
 
 The reference CLI for **Rule**, the ds-next terminal design system in the Modernist direction, built in TypeScript with [Ink](https://github.com/vadimdemedes/ink). The whole spec is in the source, `rule` walks through every part of it, and `rule demo` runs a live session drawn in Rule. The components are the design system in code, so a CLI built in this style can import them instead of redrawing frames by hand.
 
 The agent terminal also comes in **Rail**, the look ds-next ships today: steel blue on graphite, the dog and the cat, Cortex Code's rounded box. One CLI, two looks: `--look rail` (or `DS_LOOK=rail`) changes how it's drawn, nothing else. See [Two looks](#two-looks-rule-and-rail).
 
-It matches the Python `../rule-cli/`. The one difference is that the input box here stays closed on all four sides while you type, which prompt_toolkit couldn't do.
+It started inside [ds-next](https://github.com/cwkoenigs/ds-next), in `docs/design-system-rule/`, and moved here with its history on 2026-10-26. The Rule design package it draws from (tokens, spec pages, the Claude Design transcripts) and the Python version of this CLI stay there: [`docs/design-system-rule/`](https://github.com/cwkoenigs/ds-next/tree/main/docs/design-system-rule). The Python version matches this one, except that the input box here stays closed on all four sides while you type, which prompt_toolkit couldn't do.
 
 ## Run it
 
 Needs Node 22.22 or newer (the team runs 26). The commands are the same on Mac and Windows.
 
 ```sh
+git clone https://github.com/cwkoenigs/rule-cli.git ~/Developer/rule-cli
+cd ~/Developer/rule-cli
 npm install        # installs and builds
 npm link           # puts `rule` on your PATH
 rule               # the tour: every section, enter between chapters, q quits
@@ -86,6 +88,8 @@ They read the canon and skills-os where ds-next does: `DS_CANON` and `DS_SKILLS`
 DS_CANON=~/Developer/canon DS_SKILLS=~/Developer/skills-os sh test/parity/run.sh
 ```
 
+It runs ds-next's Python from a ds-next checkout: `DS_NEXT`, else `~/Developer/ds-next`, with its environment set up (`uv sync` there).
+
 Two differences are expected:
 - `canon_read` of an unknown id: ds-next's message carries extra quotes, a side effect of Python's `KeyError`.
 - A manifest that isn't valid TOML: the error is worded by a different parser.
@@ -111,7 +115,7 @@ Two differences are expected:
 
 Everything else is shared: the agent and its tools, the queue, `esc`, the watchdog, and the commands (`/status`, `/model`, `/last`, `/clear`, `/help`, `/exit`).
 
-**Rail comes from ds-next itself.** The palette, ANSI-16 fallbacks, glyphs, spinner, grid and mascot in `src/rail/tokens.ts` are `src/ds_next/ui_style.py`'s values, and a test reads that file and checks every one. The builders in `src/rail/builders.ts` are its functions with the same names (`run`, `result`, `footer`, `frame`, `banner`, `promptBox`, `toolbar`...). The owner's departures from the design handoff are kept: the rounded box with the session tag, the brighter banner, ctrl-c twice to leave.
+**Rail comes from ds-next itself.** The palette, ANSI-16 fallbacks, glyphs, spinner, grid and mascot in `src/rail/tokens.ts` are ds-next's `src/ds_next/ui_style.py` values, and a test reads that file and checks every one. It finds ds-next at `DS_NEXT`, else `~/Developer/ds-next`, and skips those checks when there is no checkout. The builders in `src/rail/builders.ts` are its functions with the same names (`run`, `result`, `footer`, `frame`, `banner`, `promptBox`, `toolbar`...). The owner's departures from the design handoff are kept: the rounded box with the session tag, the brighter banner, ctrl-c twice to leave.
 
 **Where Rail here departs from ds-next:**
 - **Long lines wrap inside the box,** and the box that stays in the scrollback keeps the whole line. ds-next's box scrolls sideways and its echo is cut at the box's width.
@@ -126,7 +130,7 @@ Everything else is shared: the agent and its tools, the queue, `esc`, the watchd
 
 | File | Holds |
 |---|---|
-| `src/tokens.ts` | Colour roles (dark, light, ANSI-16), glyphs, grid, spinner, verbs, mascot: `../tokens.json` typed |
+| `src/tokens.ts` | Colour roles (dark, light, ANSI-16), glyphs, grid, spinner, verbs, mascot: ds-next's [`docs/design-system-rule/tokens.json`](https://github.com/cwkoenigs/ds-next/blob/main/docs/design-system-rule/tokens.json) typed |
 | `src/spec.ts` | The spec as data: assumptions, the differences from Canopy, principles, colour, glyphs, grid, case, motion, code map, screens, known gaps |
 | `src/text.ts` | The row model: a line is a list of spans with colour roles, so tests can measure every cell |
 | `src/builders.ts` | Every message type as rows: `turnRule`, `you`, `agent`, `tool`, `result`, `thinking`, `thought`, `outcome`, `facts`, `frame`, `dialog`, `inputBox`, `statusRow`, `popupRows`, `banner` |

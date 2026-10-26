@@ -1,4 +1,5 @@
-// Rule tokens: the values in ../tokens.json, typed. Colour roles come from the Modernist ramps.
+// Rule tokens: the values in ds-next's docs/design-system-rule/tokens.json, typed. Colour roles come
+// from the Modernist ramps.
 import type {RailRole} from './rail/tokens.js';
 
 export type RuleRole = 'text' | 'muted' | 'dim' | 'rule' | 'accent' | 'accentText' | 'surface' | 'bg';
