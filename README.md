@@ -70,7 +70,7 @@ rule agent --agent codex            # or DS_AGENT=codex once, in your shell prof
 ```
 
 - **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does.
-- **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs.
+- **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs. It reads your settings and the repo's `CLAUDE.md` as usual, but runs no hooks, yours or the repo's: a cloned repo's `.claude/settings.json` could otherwise run a command as the session starts, and `rule` has no trust prompt to ask first. Hooks your organisation manages still run.
 - **Codex** works with no CLI installed either: `rule` carries a pinned Codex (`@openai/codex`) and runs it as `codex app-server`, the protocol Codex's editor extensions use. It uses your normal Codex login (`~/.codex`). Codex asks before running a command that isn't a known read and before changing a file; those questions, and ds-next's writes, come to the same approval as with the other agents. Turns end with a token count, since Codex reports no cost. `CODEX_CLI_PATH` runs a different Codex binary instead.
 - **What you see:**
   - Thinking folds to `· Thought for 3s`.

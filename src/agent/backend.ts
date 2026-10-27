@@ -251,6 +251,10 @@ export async function openSession(o: SessionOptions): Promise<AgentSession> {
 					strictMcpConfig: true, // the terminal's own servers only
 					systemPrompt: {type: 'preset', preset: 'claude_code', append: prompt},
 					settingSources: ['user', 'project'], // the repo's CLAUDE.md and the user's settings, as a normal session has
+					// No hooks: a cloned repo's .claude/settings.json could otherwise run a command as the session
+					// starts, with nothing asked (Claude Code asks first, in its trust dialog). This tier outranks
+					// project settings and is not policy, so no IT-managed tier drops it; managed hooks still run.
+					settings: {disableAllHooks: true},
 					permissionMode: 'default', // approvals come to the dialog, not to auto mode
 				}
 			: {

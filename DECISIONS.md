@@ -327,3 +327,33 @@ from its git history. Each is dated when it was made.
 - **Validation:** `test/code.test.ts` links a file outside the repo into it: `definition` refuses it,
   and neither `find_symbol` nor `repo_overview` names it. The test failed before.
 - **Review date:** when a third language server is added.
+
+## local-015: Claude sessions run no hooks
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Codex's review said a repo's `.claude/settings.json` permission rules could skip
+  `canUseTool`. A live probe on the owner's Mac (Agent SDK 0.3.310, Haiku) found that a project
+  `allow: ["Bash"]` still reached rule's gate, but a project `SessionStart` hook ran its command as
+  the session started, with nothing asked. `settingSources` includes `'project'` so the repo's
+  `CLAUDE.md` loads, and that loads the project's hooks too. Claude Code asks before trusting a
+  folder; the SDK has no such prompt, and neither does rule.
+- **Options considered:**
+  1. **`settings: {disableAllHooks: true}`**: chosen. The flag tier outranks project settings and
+     is not a policy tier, so an IT-managed tier does not drop it; managed hooks still run. The
+     user's own hooks stop running in `rule agent` too.
+  2. **Ask once per repo, as Claude Code does**: keeps the user's hooks, but needs a new prompt and
+     a stored list of trusted folders.
+  3. **Drop `'project'` from `settingSources`**: no project hooks, but no `CLAUDE.md`, project skills
+     or commands either.
+  4. **`managedSettings: {allowManagedHooksOnly: true}`**: worked in the probe, but the SDK drops
+     an embedder's managed settings where an IT-managed tier exists, as on work machines, silently.
+- **Decision:** the Claude session passes `settings: {disableAllHooks: true}`.
+- **Consequences:** No hook from the user, the project or local settings runs in `rule agent`;
+  `CLAUDE.md`, skills, commands and the permission gate are unchanged. Whether Cortex Code or Codex
+  load a project's hooks the same way has not been checked.
+- **Validation:** `test/agent.test.tsx` starts the real Claude Code, with a home of its own, a fake
+  key and a dead address, in a folder whose settings define a `SessionStart` hook; the hook does not
+  run. On the code before this change it does.
+- **Review date:** each `@anthropic-ai/claude-agent-sdk` upgrade, and if people miss their hooks
+  (then option 2).

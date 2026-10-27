@@ -1,4 +1,7 @@
 import {render} from 'ink-testing-library';
+import {existsSync, mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {AgentApp, type Opener} from '../src/agent/AgentApp.js';
 import {type Answer, chooseBackend, dsServer, load, openSession, permissionGate, ruleSpec} from '../src/agent/backend.js';
@@ -230,6 +233,39 @@ describe('backends', () => {
 			delete process.env['CORTEX_CODE_CLI_PATH'];
 		}
 	});
+
+	it("runs none of a repo's own hooks: its .claude/settings.json cannot start a command", async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'rule-hook-'));
+		mkdirSync(join(dir, '.claude'));
+		const ran = join(dir, 'hook-ran');
+		const hook = `"${process.execPath}" -e "require('fs').writeFileSync(process.env.RULE_HOOK_MARKER, '')"`;
+		writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({hooks: {SessionStart: [{hooks: [{type: 'command', command: hook}]}]}}));
+		// The real Claude Code with nowhere to send a request: a home of its own, a fake key, a dead address.
+		const env: Record<string, string> = {
+			CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'rule-claude-home-')),
+			ANTHROPIC_API_KEY: 'sk-ant-test-not-a-key',
+			ANTHROPIC_BASE_URL: 'http://127.0.0.1:9',
+			DS_CANON: join(dir, 'no-canon'),
+			DS_SKILLS: join(dir, 'no-skills'),
+			RULE_HOOK_MARKER: ran,
+		};
+		const saved = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
+		Object.assign(process.env, env);
+		let started = false;
+		const session = await openSession({backend: 'claude', cwd: dir, ask: async () => 'no', onEvent: e => (started ||= e.kind === 'init'), onClose: () => {}});
+		try {
+			session.send('hi');
+			await until(() => String(started), v => v === 'true');
+			await tick(1500); // a SessionStart hook has run by init; this is margin
+			expect(existsSync(ran)).toBe(false);
+		} finally {
+			session.close();
+			for (const [k, v] of Object.entries(saved)) {
+				if (v === undefined) delete process.env[k];
+				else process.env[k] = v;
+			}
+		}
+	}, 30_000);
 
 	it('rule_spec reads a section, and says which exist when one does not', () => {
 		expect(JSON.parse(ruleSpec('principles'))['The grid shows']).toMatch(/Three columns/);

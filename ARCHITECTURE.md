@@ -73,6 +73,9 @@ flowchart TD
   dialog and the Rail approval keep what was typed in a ref every key updates at once.
 - **Two files know the agent.** `agent/backend.ts` loads the Claude or Cortex SDK; `agent/codex.ts`
   drives Codex. The rest sees `AgentEvent`s and an `AgentSession`.
+- **A repo cannot run commands through the agent's settings.** Claude sessions load the user's and
+  the project's settings (for `CLAUDE.md`) with `disableAllHooks`, so a cloned repo's
+  `.claude/settings.json` hooks never run (local-015).
 - **The ds tools are ds-next's.** `ds/` is a port of ds-next's Python with the same tool names,
   descriptions, arguments and outputs. `test/parity/run.sh` runs both through 229 steps on a real
   canon and compares everything. Reads never ask; writes always do.

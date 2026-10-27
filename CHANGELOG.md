@@ -9,6 +9,9 @@ the CLI started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Fixed
+- A Claude session ran the repo's own hooks: a cloned repo's `.claude/settings.json` could run a
+  command as `rule agent` started, with nothing asked. Claude sessions now run no hooks but those an
+  organisation manages (local-015). (#5)
 - The code tools no longer run a repo's own `.venv/bin/python`: Pyright was given it as its
   interpreter and ran it, so a cloned repo could run code from a tool that never asks. Pyright now
   gets the environment's package folders instead (local-011). (#5)
