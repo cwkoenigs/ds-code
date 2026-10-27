@@ -399,6 +399,10 @@ export type Manifest = {repo?: {name?: unknown}; blocks?: Record<string, {versio
 export function repoPackage(repo: string, what: string): {manifestPath: string; manifestText: string; manifest: Manifest; pkg: string} {
 	const manifestPath = join(repo, '.ds', 'manifest.toml');
 	if (!isFile(manifestPath)) throw new InputError(`${repo} has no .ds/manifest.toml; create it with ds-next new first`);
+	// Both are rewritten after the code is: refuse a link now, before anything is written, so what the
+	// person approved lands in this repo and nowhere else.
+	inside(repo, '.ds/manifest.toml');
+	inside(repo, 'pyproject.toml');
 	const manifestText = readText(manifestPath);
 	let manifest: Manifest;
 	try {
@@ -415,7 +419,7 @@ export function repoPackage(repo: string, what: string): {manifestPath: string; 
 export function addRequirements(repo: string, lists: [key: string, reqs: string[]][]): {added: string[]; manual: string[]} {
 	const added: string[] = [];
 	const manual: string[] = [];
-	const pyproject = join(repo, 'pyproject.toml');
+	const pyproject = inside(repo, 'pyproject.toml');
 	for (const [key, wanted] of lists) {
 		if (!wanted.length) continue;
 		const result = addToListLine(isFile(pyproject) ? readText(pyproject) : '', key, wanted);

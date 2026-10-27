@@ -3,13 +3,14 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {render} from 'ink-testing-library';
+import {spawn} from 'node:child_process';
 import {chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {AgentApp} from '../src/agent/AgentApp.js';
 import {type Answer, chooseBackend, LABELS, openSession} from '../src/agent/backend.js';
-import {codexCommand, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
+import {AppServer, codexCommand, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
 import type {AgentEvent} from '../src/agent/events.js';
 import {RAIL} from '../src/agent/looks.js';
 import {askContent} from '../src/agent/present.js';
@@ -145,6 +146,16 @@ describe('Codex, the pieces', () => {
 		expect(dynamicTool(t)).toMatchObject({type: 'function', name: 'canon_read', inputSchema: {type: 'object', properties: {id: {type: 'string'}}}});
 	});
 
+	it('gives up on a request Codex never answers, instead of waiting for good', async () => {
+		const silent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio: ['pipe', 'pipe', 'pipe']});
+		try {
+			const rpc = new AppServer(silent, () => {}, async () => null, 200);
+			await expect(rpc.request('initialize', {})).rejects.toThrow('Codex took longer than 0.2s to answer initialize');
+		} finally {
+			silent.kill();
+		}
+	});
+
 	it('reads Codex items as rule reads tool calls', () => {
 		expect(toolCall({type: 'fileChange', changes: [{path: 'src/a.ts', kind: {type: 'update', move_path: null}, diff: '@@\n-old\n+new\n+more'}]})).toEqual({
 			name: 'Edit',
@@ -196,6 +207,9 @@ describe('rule mcp', () => {
 		expect(tools).toHaveLength(26);
 		const hint = (n: string) => tools.find(t => t.name === n)!.annotations?.readOnlyHint;
 		expect([hint('canon_read'), hint('rule_spec'), hint('scaffold_project'), hint('capture')]).toEqual([true, true, false, false]);
+		// Only the writes that add say so; a client may skip asking about an additive one.
+		const destructive = tools.filter(t => t.annotations?.destructiveHint).map(t => t.name).sort();
+		expect(destructive).toEqual(['adopt_repo', 'block_add', 'code_add']);
 		const r = await c.callTool({name: 'rule_spec', arguments: {section: 'principles'}});
 		expect(r.isError).toBe(false);
 		expect((r.content as {text: string}[])[0]!.text).toContain('The grid shows');

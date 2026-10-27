@@ -1,6 +1,6 @@
 // Rule's message types as row builders. Same names as ui_style.py where the concept is the same.
 // Every frame is exactly `w` cells wide; every other row fits inside it.
-import {bold, type Content, fit, row, type Row, s, type Span, splitAt, width, wrapWords} from './text.js';
+import {bold, type Content, fit, nextBoundary, row, type Row, s, type Span, splitAt, width, wrapWords} from './text.js';
 import {G, GRID, MASCOT, MASCOT_INKS, type Role, VERBS} from './tokens.js';
 
 const W: number = GRID.designWidth;
@@ -91,13 +91,13 @@ export function frame(rows: (Row | null)[], {edge = 'rule' as Role, title = unde
 
 /** The text inside the input box: › typed, a cursor, and a dim hint while empty. */
 export function inputLine(typed: string, {hint = '', at = typed.length} = {}): Row {
-	const ch = typed[at] ?? ' ';
+	const end = nextBoundary(typed, at); // the cursor covers a whole character, an emoji too
 	return row(
 		s(G.prompt, 'accentText'),
 		' ',
 		typed.slice(0, at),
-		cursor(ch),
-		typed.slice(at + 1),
+		cursor(typed.slice(at, end) || ' '),
+		typed.slice(end),
 		!typed && hint ? s(hint, 'dim') : '',
 	);
 }

@@ -69,7 +69,7 @@ rule agent --agent claude --model claude-sonnet-5-5
 rule agent --agent codex            # or DS_AGENT=codex once, in your shell profile
 ```
 
-- **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does.
+- **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does. Cortex Code runs a repo's own hooks (from its `.cortex` or `.claude` settings) and its SDK can't switch them off, so where a repo's settings define any, `rule` shows each command and asks before the session starts; a no starts nothing.
 - **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs. It reads your settings and the repo's `CLAUDE.md` as usual, but runs no hooks, yours or the repo's: a cloned repo's `.claude/settings.json` could otherwise run a command as the session starts, and `rule` has no trust prompt to ask first. Hooks your organisation manages still run.
 - **Codex** works with no CLI installed either: `rule` carries a pinned Codex (`@openai/codex`) and runs it as `codex app-server`, the protocol Codex's editor extensions use. It uses your normal Codex login (`~/.codex`). Codex asks before running a command that isn't a known read and before changing a file; those questions, and ds-next's writes, come to the same approval as with the other agents. Turns end with a token count, since Codex reports no cost. `CODEX_CLI_PATH` runs a different Codex binary instead.
 - **What you see:**
@@ -77,7 +77,7 @@ rule agent --agent codex            # or DS_AGENT=codex once, in your shell prof
   - Each tool shows as ▫ while it runs, then lands as ▪ with its result as a fact (`142 lines`, `+14 −1`).
   - Replies print as Rule Markdown: uppercase headings, code on the surface colour.
   - Each turn ends with `N tools  12.3s  $0.0123` (Cortex reports no cost).
-- **Approvals:** anything that writes a file or runs a command opens the approval dialog. `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and every `code` tool.
+- **Approvals:** anything that writes a file or runs a command opens the approval dialog, even when your Claude Code settings allow it (an `allow` rule, or a "don't ask again" saved there). `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and every `code` tool.
 - **Keys:** `esc` interrupts a turn, `ctrl-o` opens the last fold, and messages typed mid-turn are queued.
 - **Commands:** `/status`, `/model <name>`, `/clear` (new conversation) and `/exit` are local; any other `/command` goes to the agent.
 - **Stalls:** a turn silent for 10 minutes, outside an approval, is interrupted, as in ds-next. The next message carries on the same session.
@@ -154,10 +154,13 @@ Two differences are expected:
 - `canon_read` of an unknown id: ds-next's message carries extra quotes, a side effect of Python's `KeyError`.
 - A manifest that isn't valid TOML: the error is worded by a different parser.
 
+Any other difference fails the check (it exits 1).
+
 **Where the port departs from ds-next, on purpose:**
 - **`adopt_repo` is offered to the agent.** ds-next defines it and its prompt tells the agent to use it, but it's missing from the tools ds-next registers.
 - **List arguments are read as lists.** A list passed for `tags` or `ids` reads as the comma-separated string; ds-next would read the list's Python text.
 - **A tool that fails says why.** A canon that no longer matches its index returns an `ERROR:` result instead of an exception.
+- **No metadata is written through a link.** `block_add` and `code_add` refuse a `pyproject.toml` or `.ds/manifest.toml` that is a symbolic link, before writing anything; ds-next would write through it.
 
 ## Two looks: Rule and Rail
 

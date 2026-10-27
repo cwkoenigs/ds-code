@@ -36,14 +36,29 @@ export class AppServer {
 		private child: ChildProcess,
 		private onNotification: (method: string, params: Obj) => void,
 		private onRequest: (method: string, params: Obj) => Promise<unknown>,
+		private timeoutMs = 60_000,
 	) {
 		createInterface({input: child.stdout!}).on('line', line => this.receive(line));
 	}
 
+	/** A request and its reply. One that never comes fails after `timeoutMs`: a Codex that stays up but
+	 *  stops answering would otherwise hold the session's start, or an interrupt, for good. */
 	request<T = Obj>(method: string, params: Obj): Promise<T> {
 		const id = this.next++;
 		return new Promise<T>((resolve, reject) => {
-			this.waiting.set(id, {resolve: v => resolve(v as T), reject});
+			const timer = setTimeout(() => {
+				if (this.waiting.delete(id)) reject(new Error(`Codex took longer than ${this.timeoutMs / 1000}s to answer ${method}`));
+			}, this.timeoutMs);
+			this.waiting.set(id, {
+				resolve: v => {
+					clearTimeout(timer);
+					resolve(v as T);
+				},
+				reject: e => {
+					clearTimeout(timer);
+					reject(e);
+				},
+			});
 			this.write({id, method, params});
 		});
 	}

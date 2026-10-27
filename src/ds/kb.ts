@@ -30,9 +30,10 @@ export const isDir = (p: string): boolean => {
 	}
 };
 /** A path as Python's Path(p) spells it: doubled separators, `.` parts and a trailing separator
- *  dropped, `..` kept (Path does not resolve it). The canon's path is written into manifests. */
+ *  dropped, `..` kept (Path does not resolve it). The canon's path is written into manifests. Exactly
+ *  two leading separators stay two, as Path keeps them: a Windows share is `\\server\share`. */
 export function purePath(p: string): string {
-	const root = /^[\\/]/.test(p) ? sep : '';
+	const root = /^[\\/]{2}(?![\\/])/.test(p) ? sep + sep : /^[\\/]/.test(p) ? sep : '';
 	const parts = p.split(/[\\/]+/).filter(x => x && x !== '.');
 	return root + parts.join(sep) || '.';
 }

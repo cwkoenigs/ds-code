@@ -99,6 +99,25 @@ export function splitAt(r: Row, w: number): [Row, Row] {
 	return [head, tail];
 }
 
+const graphemes = new Intl.Segmenter(undefined, {granularity: 'grapheme'});
+
+/** Where the character `at` falls in ends: an emoji, or a letter with its accents, is one character
+ *  however many UTF-16 units it takes, so the cursor never stands inside one. */
+export function nextBoundary(text: string, at: number): number {
+	for (const {index, segment} of graphemes.segment(text)) if (index + segment.length > at) return index + segment.length;
+	return text.length;
+}
+
+/** Where the character before `at` starts. */
+export function prevBoundary(text: string, at: number): number {
+	let start = 0;
+	for (const {index} of graphemes.segment(text)) {
+		if (index >= at) break;
+		start = index;
+	}
+	return start;
+}
+
 /** Every line of `text`, broken every `w` cells and never cut: for a request a person approves, which
  *  must reach them whole (canon gotcha-approvals). */
 export function breakLines(text: string, w: number): string[] {

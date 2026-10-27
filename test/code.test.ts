@@ -58,6 +58,16 @@ describe('the code tools on a TypeScript project', () => {
 		expect(map).toContain('imported by nothing: src/main.ts');
 	});
 
+	it('starts one server for calls that arrive together', async () => {
+		const code = new CodeIntel(join(FIXTURES, 'code-ts'));
+		try {
+			const [a, b] = await Promise.all([code.server('typescript'), code.server('typescript')]);
+			expect(a).toBe(b); // a second would never be stopped
+		} finally {
+			await code.close();
+		}
+	});
+
 	it('says what is wrong as an ERROR the model can act on', async () => {
 		expect(await run('find_symbol', {name: 'nothing'})).toEqual({text: 'ERROR: no symbol named "nothing" in the repo', error: true});
 		expect((await run('file_symbols', {path: '../code-py/pkg/greet.py'})).text).toBe('ERROR: ../code-py/pkg/greet.py is outside the repo');

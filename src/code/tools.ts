@@ -50,13 +50,23 @@ export class CodeIntel {
 
 	constructor(readonly root: string) {}
 
-	/** The server for a language, started on first use and started again if it stopped. */
+	/** The server for a language, started on first use and started again if it stopped. Calls that
+	 *  arrive together share one start: a second server would never be stopped. */
 	async server(lang: Language): Promise<LanguageServer> {
-		const running = await this.servers.get(lang)?.catch(() => undefined);
-		if (running?.alive) return running;
+		const known = this.servers.get(lang);
+		if (known) {
+			const running = await known.catch(() => undefined);
+			if (running?.alive) return running;
+			if (this.servers.get(lang) !== known) return this.server(lang); // another call restarted it meanwhile
+		}
 		const starting = (async () => {
 			const s = new LanguageServer(serverSpec(lang, this.root), this.root);
-			await s.initialized;
+			try {
+				await s.initialized;
+			} catch (err) {
+				void s.stop(); // a server that never answered is still running
+				throw err;
+			}
 			// The TypeScript server learns the project from its first open file: give it one of the repo's.
 			const anchor = listFiles(this.root).find(f => languageOf(f) === lang && !f.endsWith('.d.ts'));
 			if (anchor) {
@@ -67,7 +77,7 @@ export class CodeIntel {
 			return s;
 		})();
 		this.servers.set(lang, starting);
-		starting.catch(() => this.servers.delete(lang));
+		starting.catch(() => this.servers.get(lang) === starting && this.servers.delete(lang));
 		return starting;
 	}
 

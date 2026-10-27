@@ -350,10 +350,64 @@ from its git history. Each is dated when it was made.
      an embedder's managed settings where an IT-managed tier exists, as on work machines, silently.
 - **Decision:** the Claude session passes `settings: {disableAllHooks: true}`.
 - **Consequences:** No hook from the user, the project or local settings runs in `rule agent`;
-  `CLAUDE.md`, skills, commands and the permission gate are unchanged. Whether Cortex Code or Codex
-  load a project's hooks the same way has not been checked.
+  `CLAUDE.md`, skills, commands and the permission gate are unchanged. Cortex Code runs a project's
+  hooks too, and cannot be stopped the same way (local-016); Codex's did not run (local-016).
 - **Validation:** `test/agent.test.tsx` starts the real Claude Code, with a home of its own, a fake
   key and a dead address, in a folder whose settings define a `SessionStart` hook; the hook does not
   run. On the code before this change it does.
 - **Review date:** each `@anthropic-ai/claude-agent-sdk` upgrade, and if people miss their hooks
   (then option 2).
+
+## local-016: Cortex Code asks before it starts where a repo defines hooks
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** A live probe (Cortex Code 1.2.18, Cortex agent SDK) in a folder whose
+  `.cortex/settings.json` and `.claude/settings.json` define hooks: both `UserPromptSubmit` hooks
+  ran on the first prompt, with nothing asked. Codex 0.164.0 ran no project hook in the same test,
+  even with the project marked trusted and `codex_hooks` on; it keeps a per-hook trust store. A
+  repo's own `.cortex` or `.claude` permission rules did not skip rule's gate.
+- **Options considered:**
+  1. **`settingSources: ['user']`**: tried. The hooks still ran, and Cortex no longer read the
+     repo's `AGENTS.md` or `CLAUDE.md`.
+  2. **`--config` with `disableAllHooks: true`** (through the SDK's `extraArgs`): tried. The hooks
+     still ran.
+  3. **Show the person every hook and ask before the session starts**: chosen. The canon's
+     gotcha-approvals: commands always ask.
+- **Decision:** before a Cortex session, `projectHooks` reads `.cortex/settings{,.local}.json` and
+  `.claude/settings{,.local}.json` in the folder and at the repo's top. When any define hooks, the
+  approval dialog shows each event and command, whole. A no starts nothing and says to remove them
+  or to use `--agent claude`; a yes lasts while rule runs, until the hooks change.
+- **Consequences:** Cortex in a repo with hooks costs one question per run of rule. A settings file
+  that names hooks but is not JSON is shown whole. Hooks Cortex reads from anywhere else are not
+  seen.
+- **Validation:** `test/agent.test.tsx` opens a Cortex session where `.cortex/settings.json` defines
+  a hook: the person is asked with the command, and a no starts nothing.
+- **Review date:** each `@snowflake/cortex-agent-sdk` upgrade: switch to its off switch when it has one.
+
+## local-017: No settings file lets a Claude tool skip the dialog
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Offline, with the real Claude Code and a stand-in Messages API
+  (`test/fixtures/fake-anthropic.ts`): with `permissions.allow: ["Bash"]` in the person's own
+  settings, a `Bash` command ran and rule never asked. A "don't ask again" saved in Claude Code is the
+  same kind of rule. The README, `AGENTS.md` and the canon's gotcha-approvals all say commands and
+  writes ask.
+- **Options considered:**
+  1. **Honour the person's rules, and say so**: fewer questions, but rule's one promise breaks for
+     anyone who has used Claude Code.
+  2. **`managedSettings: {allowManagedPermissionRulesOnly: true}`**: the SDK drops it on machines
+     with an IT-managed tier, as on work machines, silently.
+  3. **Drop `'user'` from `settingSources`**: also drops the person's `CLAUDE.md` and skills.
+  4. **A `PreToolUse` callback that answers "ask" for everything but Claude Code's reads**: chosen.
+     It runs under `disableAllHooks`, since it is not a settings-file hook, and "ask" sends the call
+     to `canUseTool`.
+- **Decision:** `askFirst` leaves `Read`, `Glob`, `Grep` and Claude Code's other read, plan and
+  hand-off tools as Claude Code decides, and rule's own read-only tools; every other tool, a new one
+  included, goes to the dialog.
+- **Consequences:** Allow rules in settings no longer save a question in `rule agent`; deny rules
+  still apply. Reads in the project still pass, and reads outside it still ask.
+- **Validation:** `test/agent.test.tsx`: with a user allow rule for `Bash`, the command asks and,
+  declined, does not run (it ran before); a `Read` in the project still does not ask.
+- **Review date:** each `@anthropic-ai/claude-agent-sdk` upgrade.

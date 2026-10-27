@@ -1,7 +1,7 @@
 // Rail's message types as row builders: ds-next's ui_style.py, ported. Same names where the concept
 // is the same (you, run, result, outcome, footer, labelled, hint, fold, error, frame, banner,
 // prompt_box → promptBox, toolbar). One rail per turn; a frame means "needs you".
-import {bold, breakLines, type Content, fit, row, type Row, s, type Span, splitAt, truncate, width} from '../text.js';
+import {bold, breakLines, type Content, fit, nextBoundary, row, type Row, s, type Span, splitAt, truncate, width} from '../text.js';
 import {G, GRID, MASCOT, MASCOT_INKS, type RailRole} from './tokens.js';
 
 const W: number = GRID.designWidth;
@@ -160,7 +160,8 @@ export function promptBox(tag: string, body: Row, w: number): Row[] {
 
 /** The line inside the live box: › typed, a cursor, and a dim hint while empty. */
 export function promptLine(typed: string, {hint: h = '', at = typed.length} = {}): Row {
-	return row(s(G.prompt, 'strong'), ' ', typed.slice(0, at), cursor(typed[at] ?? ' '), typed.slice(at + 1), !typed && h ? s(h, 'dim') : '');
+	const end = nextBoundary(typed, at); // the cursor covers a whole character, an emoji too
+	return row(s(G.prompt, 'strong'), ' ', typed.slice(0, at), cursor(typed.slice(at, end) || ' '), typed.slice(end), !typed && h ? s(h, 'dim') : '');
 }
 
 /** The box again once the line is accepted, with the line in it: what stays in the scrollback. */

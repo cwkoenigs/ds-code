@@ -75,7 +75,10 @@ flowchart TD
   drives Codex. The rest sees `AgentEvent`s and an `AgentSession`.
 - **A repo cannot run commands through the agent's settings.** Claude sessions load the user's and
   the project's settings (for `CLAUDE.md`) with `disableAllHooks`, so a cloned repo's
-  `.claude/settings.json` hooks never run (local-015).
+  `.claude/settings.json` hooks never run (local-015). Cortex Code runs a repo's hooks with no way
+  to stop it, so `openSession` shows them and asks before a Cortex session starts (local-016).
+- **No settings file skips the dialog.** A `PreToolUse` callback (`askFirst`) sends every Claude
+  tool but the reads to `canUseTool`, so an allow rule in the person's settings still asks (local-017).
 - **The ds tools are ds-next's.** `ds/` is a port of ds-next's Python with the same tool names,
   descriptions, arguments and outputs. `test/parity/run.sh` runs both through 229 steps on a real
   canon and compares everything. Reads never ask; writes always do.
@@ -189,6 +192,7 @@ flowchart TD
 | `test/codex.test.tsx` | Codex against a stand-in app-server, drawn in Rail, and end to end with the real app-server and a stand-in model; `rule mcp` |
 | `test/fixtures/fake-codex.mjs` | A stand-in for `codex app-server`: one scripted turn with a ds tool call and a command approval |
 | `test/fixtures/fake-model.ts` | A stand-in for the model API Codex calls, so the real app-server plays a turn with no account |
+| `test/fixtures/fake-anthropic.ts` | A stand-in for Anthropic's Messages API, so the real Claude Code plays a turn with no account and no network |
 | `test/fixtures/code-ts/package.json`, `test/fixtures/code-ts/tsconfig.json`, `test/fixtures/code-ts/src/greet.ts`, `test/fixtures/code-ts/src/main.ts` | A small TypeScript project for the code tools: `greet`, `shout` which calls it, `run` which calls both |
 | `test/fixtures/code-py/pyproject.toml`, `test/fixtures/code-py/pkg/__init__.py`, `test/fixtures/code-py/pkg/greet.py`, `test/fixtures/code-py/pkg/main.py` | The same project in Python |
 | `test/architecture.test.ts` | That this page names every file, and names no file that is gone |

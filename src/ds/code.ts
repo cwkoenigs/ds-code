@@ -52,17 +52,23 @@ export function search(canon: Canon, query: string, limit = 8): CodeSymbol[] {
 const HELPER = fileURLToPath(new URL('../../python/code_cut.py', import.meta.url));
 let python: string[] | null | undefined; // undefined: not looked for yet; null: none found
 
-/** A Python 3.10+ to run the cut with: $DS_PYTHON, then uv, then python3, python, py -3. */
-function findPython(): string[] | null {
-	if (python !== undefined) return python;
+/** The ways to run a Python 3.10+ for the cut, in order: $DS_PYTHON, then uv, then python3, python,
+ *  py -3. uv uses a Python it already has: code_get only reads, so it must never download and install
+ *  one, or go online at all. */
+export function pythonCandidates(): string[][] {
 	const uv = which('uv');
-	const candidates: string[][] = [
+	return [
 		...(process.env['DS_PYTHON'] ? [[process.env['DS_PYTHON']]] : []),
-		...(uv ? [[uv, 'run', '--no-project', '--quiet', '--python', '>=3.10', 'python']] : []),
+		...(uv ? [[uv, 'run', '--no-project', '--quiet', '--no-python-downloads', '--offline', '--python', '>=3.10', 'python']] : []),
 		...['python3', 'python'].flatMap(c => (which(c) ? [[which(c)!]] : [])),
 		...(process.platform === 'win32' && which('py') ? [[which('py')!, '-3']] : []),
 	];
-	for (const c of candidates) {
+}
+
+/** A Python 3.10+ to run the cut with, the first of pythonCandidates that is one. */
+function findPython(): string[] | null {
+	if (python !== undefined) return python;
+	for (const c of pythonCandidates()) {
 		const r = spawnSync(c[0]!, [...c.slice(1), '-I', '-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'], {encoding: 'utf8', timeout: 120_000});
 		if (r.status === 0) return (python = c);
 	}

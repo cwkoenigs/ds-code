@@ -78,11 +78,16 @@ function docs(repo: string): string[] {
 type Entry = Record<string, unknown>;
 const isTable = (x: unknown): x is Entry => typeof x === 'object' && x !== null && !Array.isArray(x) && !(x instanceof Date);
 
-/** A version: a whole number from 1 up (not a bool, not a float). */
+/** A version: a whole number from 1 up (not a bool, not a float). The manifest is read with TOML's
+ *  integers as bigints, so `version = 1.0`, a float, is told from `version = 1`, as in Python. */
 function version(e: Entry): number | undefined {
 	const v = e['version'];
-	return typeof v === 'number' && Number.isInteger(v) && v >= 1 ? v : undefined;
+	return typeof v === 'bigint' && v >= 1n ? Number(v) : undefined;
 }
+
+/** repr() of a manifest value: a TOML float as Python writes it (1.0, not 1). */
+const tomlRepr = (v: unknown): string =>
+	typeof v === 'number' ? (Number.isNaN(v) ? 'nan' : !Number.isFinite(v) ? (v > 0 ? 'inf' : '-inf') : Number.isInteger(v) && Math.abs(v) < 1e16 ? v.toFixed(1) : String(v)) : pyReprValue(v);
 
 /** Accepted code in use, and which copies are behind the canon. Runs even when the rest of the
  *  manifest is broken, so a stale block is never hidden behind another error. */
@@ -96,7 +101,7 @@ function checkBlocks(manifest: Entry, canon: Canon, rep: Report): void {
 		const b = canon.blocks.get(bid);
 		const v = version(e);
 		if (!b) rep.errors.push(`manifest uses block ${bid}, which the canon does not have`);
-		else if (v === undefined || v > b.version) rep.errors.push(`block ${bid}: version must be a whole number from 1 to v${b.version}, not ${pyReprValue(e['version'])}`);
+		else if (v === undefined || v > b.version) rep.errors.push(`block ${bid}: version must be a whole number from 1 to v${b.version}, not ${tomlRepr(e['version'])}`);
 		else {
 			rep.blocks.push(`${bid} v${v}`);
 			if (v < b.version) rep.pending.push(`${bid} v${b.version} (block; this repo has v${v})`);
@@ -127,7 +132,7 @@ export function check(repoIn: string, canon = new Canon(), today = todayIso()): 
 		return rep;
 	}
 	try {
-		manifest = parseToml(readText(path)) as Entry;
+		manifest = parseToml(readText(path), {integersAsBigInt: true}) as Entry;
 	} catch (err) {
 		rep.errors.push(`manifest is not valid TOML: ${(err as Error).message.split('\n')[0]}`);
 		return rep;
@@ -163,16 +168,16 @@ export function check(repoIn: string, canon = new Canon(), today = todayIso()): 
 			continue;
 		}
 		if (typeof status !== 'string' || !STATUSES.includes(status)) {
-			rep.errors.push(`${sid}: status ${pyReprValue(status)} is not one of ${STATUSES.join(', ')}`);
+			rep.errors.push(`${sid}: status ${tomlRepr(status)} is not one of ${STATUSES.join(', ')}`);
 			continue;
 		}
 		const decided = status === 'adopted' || status === 'declined';
 		if (decided && version(e) === undefined) {
-			rep.errors.push(`${sid}: version must be a whole number from 1 up, not ${pyReprValue(e['version'])}`);
+			rep.errors.push(`${sid}: version must be a whole number from 1 up, not ${tomlRepr(e['version'])}`);
 			continue;
 		}
 		if (decided && !(typeof e['by'] === 'string' && e['by'].trim())) {
-			rep.errors.push(`${sid}: by must name who decided, not ${pyReprValue(e['by'])}`);
+			rep.errors.push(`${sid}: by must name who decided, not ${tomlRepr(e['by'])}`);
 			continue;
 		}
 		if (decided && version(e)! > canon.standards.get(sid)!.version) {
@@ -190,7 +195,7 @@ export function check(repoIn: string, canon = new Canon(), today = todayIso()): 
 			}
 			const revisit = revisitDate(e['revisit']);
 			if (!revisit) {
-				rep.errors.push(`${sid}: revisit must be a date like 2027-01-31, not ${typeof e['revisit'] === 'string' ? pyRepr(e['revisit']) : pyReprValue(e['revisit'])}`);
+				rep.errors.push(`${sid}: revisit must be a date like 2027-01-31, not ${typeof e['revisit'] === 'string' ? pyRepr(e['revisit']) : tomlRepr(e['revisit'])}`);
 				continue;
 			}
 			rep.declined.set(sid, String(e['reason']));

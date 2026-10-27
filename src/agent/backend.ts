@@ -6,8 +6,9 @@
 import {randomUUID} from 'node:crypto';
 import {existsSync, readFileSync} from 'node:fs';
 import {homedir} from 'node:os';
-import {delimiter, join} from 'node:path';
+import {delimiter, join, resolve} from 'node:path';
 import {z} from 'zod';
+import {git} from '../code/repo.js';
 import {CODE_SERVER, codeTools} from '../code/tools.js';
 import {Canon, Skills} from '../ds/kb.js';
 import {type DsTool, runTool, systemPrompt as dsPrompt, tools as dsTools} from '../ds/tools.js';
@@ -158,6 +159,22 @@ function inbox() {
 	};
 }
 
+/** Claude Code's own tools that only read, plan or hand work on: they go as Claude Code decides, so a
+ *  read in the project passes and one outside it asks. A subagent's tools are checked one by one. */
+const CLAUDE_READS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'TodoWrite', 'Task', 'Agent', 'Skill', 'SlashCommand', 'ToolSearch', 'BashOutput', 'TaskOutput', 'ExitPlanMode', 'EnterPlanMode', 'ListMcpResourcesTool', 'ReadMcpResourceTool']);
+
+/** A PreToolUse callback that sends every other tool to canUseTool, and so to the person. Without it,
+ *  an allow rule in the person's settings (`Bash`, or a "don't ask again" saved in Claude Code) runs a
+ *  command unasked (local-017). A tool Claude Code adds later asks too. Not a settings-file hook, so
+ *  disableAllHooks leaves it running. */
+export function askFirst(readOnly: Set<string>) {
+	return async (input: {tool_name?: unknown}) => {
+		const name = String(input.tool_name ?? '');
+		if (CLAUDE_READS.has(name) || readOnly.has(name)) return {};
+		return {hookSpecificOutput: {hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'rule asks the person before anything that is not a read'}};
+	};
+}
+
 /** The SDK's canUseTool: reading the terminal's own tools never asks; everything else asks the
  *  person, and "don't ask again" lasts for the session. */
 export function permissionGate(ask: Ask, readOnly: Set<string> = READ_ONLY) {
@@ -233,12 +250,66 @@ export function sessionParts(cwd: string, connection?: string) {
 	return {tools, code: code.tools, closeCode: code.close, readOnly: readOnlyIds(tools, code.tools), prompt: systemPrompt(cwd, canon, skills)};
 }
 
+/** Where Cortex Code reads a project's settings, and so its hooks: `.cortex` and `.claude`, shared and
+ *  local, in the folder it starts in and at the repo's top. */
+const HOOK_FILES = ['.cortex/settings.json', '.cortex/settings.local.json', '.claude/settings.json', '.claude/settings.local.json'];
+
+/** The hooks a repo's own settings define: each file, and what each event runs. A file that names
+ *  hooks but does not read as JSON is shown whole, since Cortex may read it anyway. */
+export function projectHooks(cwd: string): {file: string; runs: string[]}[] {
+	const top = git(cwd, 'rev-parse', '--show-toplevel')?.trim();
+	const out: {file: string; runs: string[]}[] = [];
+	for (const dir of new Set([resolve(cwd), ...(top ? [resolve(top)] : [])])) {
+		for (const rel of HOOK_FILES) {
+			const file = join(dir, rel);
+			let text: string;
+			try {
+				text = readFileSync(file, 'utf8');
+			} catch {
+				continue;
+			}
+			let hooks: unknown;
+			try {
+				hooks = (JSON.parse(text) as {hooks?: unknown} | null)?.hooks;
+			} catch {
+				if (/hooks/i.test(text)) out.push({file, runs: [text.trim()]});
+				continue;
+			}
+			if (!hooks || typeof hooks !== 'object' || !Object.keys(hooks).length) continue;
+			const runs = Object.entries(hooks as Record<string, unknown>).flatMap(([event, matchers]) =>
+				(Array.isArray(matchers) ? (matchers as {matcher?: unknown; hooks?: unknown}[]) : []).flatMap(m =>
+					(Array.isArray(m?.hooks) ? (m.hooks as {command?: unknown}[]) : []).map(h => `${event}${m.matcher ? ` (${String(m.matcher)})` : ''}: ${typeof h?.command === 'string' ? h.command : JSON.stringify(h)}`),
+				),
+			);
+			out.push({file, runs: runs.length ? runs : [JSON.stringify(hooks)]});
+		}
+	}
+	return out;
+}
+
+const hooksAllowed = new Set<string>(); // hooks the person let run, for as long as rule runs
+
+/** Cortex Code runs a repo's own hooks, and its SDK has no way to switch them off (local-016), so
+ *  the person sees each command and decides before a session starts in that repo. */
+async function askAboutHooks(o: SessionOptions): Promise<void> {
+	const found = projectHooks(o.cwd);
+	const key = JSON.stringify(found);
+	if (!found.length || hooksAllowed.has(key)) return;
+	const command = found.flatMap(f => [`# ${f.file}`, ...f.runs]).join('\n');
+	const answer = await o.ask('Hooks', {command, description: "Cortex Code runs these from this repo's settings as you work, without asking"});
+	if (answer === 'no') {
+		throw new AgentUnavailable(`Cortex Code not started: this repo's settings define hooks it would run (${found.map(f => f.file).join(', ')}). Remove them, or run with --agent claude, which runs no hooks.`);
+	}
+	hooksAllowed.add(key);
+}
+
 export async function openSession(o: SessionOptions): Promise<AgentSession> {
 	if (o.backend === 'codex') return (await import('./codex.js')).openCodexSession(o);
 	if (o.backend === 'cortex' && !cortexCli()) {
 		const where = process.env['CORTEX_CODE_CLI_PATH'] ? `CORTEX_CODE_CLI_PATH (${process.env['CORTEX_CODE_CLI_PATH']}) does not exist` : 'cortex is not on your PATH';
 		throw new AgentUnavailable(`Cortex Code CLI not found: ${where}. Install it, or run with --agent claude or --agent codex.`);
 	}
+	if (o.backend === 'cortex') await askAboutHooks(o);
 	const sdk = await load(o.backend);
 	const {tools, code, closeCode, readOnly, prompt} = sessionParts(o.cwd, o.connection);
 	const canUseTool = permissionGate(o.ask, readOnly);
@@ -255,6 +326,7 @@ export async function openSession(o: SessionOptions): Promise<AgentSession> {
 					// starts, with nothing asked (Claude Code asks first, in its trust dialog). This tier outranks
 					// project settings and is not policy, so no IT-managed tier drops it; managed hooks still run.
 					settings: {disableAllHooks: true},
+					hooks: {PreToolUse: [{hooks: [askFirst(readOnly)]}]}, // a settings allow rule never skips the dialog
 					permissionMode: 'default', // approvals come to the dialog, not to auto mode
 				}
 			: {

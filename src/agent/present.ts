@@ -118,6 +118,8 @@ export function askContent(name: string, input: Record<string, unknown>, cwd: st
 		}
 		case 'WebFetch':
 			return {title: 'Fetch', body: [...whole(str(input, 'url')), [s(fit(str(input, 'prompt')), 'muted')]]};
+		case 'Hooks': // a repo's own hooks, before a Cortex Code session starts there
+			return {title: "This repo's hooks", body: [...whole(str(input, 'command')), [s(fit(str(input, 'description')), 'muted')]]};
 		// ds's own writes say what they will create, in the person's terms
 		case 'scaffold_project': {
 			const where = relative(cwd, join(str(input, 'directory') || cwd, str(input, 'name'))) || str(input, 'name');
