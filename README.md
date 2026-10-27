@@ -105,7 +105,7 @@ Eight read-only tools answer what text search can't, from language servers that 
 | `callees` | What a function calls, in the repo and outside it |
 | `change_impact` | The uncommitted changes, symbol by symbol, and the files that depend on them without being changed |
 
-A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`, so references from files outside its `include` (this repo's tests, for instance) aren't found; Pyright uses the repo's `.venv` or `venv` for installed packages when there is one.
+A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`, so references from files outside its `include` (this repo's tests, for instance) aren't found; Pyright reads the packages in the repo's `.venv` or `venv` when there is one, and never runs its `python`.
 
 **Trying them.** You ask in words; the agent picks the tool. Some prompts that reach each one:
 

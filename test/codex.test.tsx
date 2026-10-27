@@ -12,21 +12,27 @@ import {type Answer, chooseBackend, LABELS, openSession} from '../src/agent/back
 import {codexCommand, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
 import type {AgentEvent} from '../src/agent/events.js';
 import {RAIL} from '../src/agent/looks.js';
+import {askContent} from '../src/agent/present.js';
+import {plain} from '../src/text.js';
 import {mcpServer} from '../src/agent/mcp.js';
 import {tools as dsTools} from '../src/ds/tools.js';
 import {fakeModel, modelConfig} from './fixtures/fake-model.js';
 import {ENTER, ready, tick, until} from './helpers.js';
 
 const FAKE = join(import.meta.dirname, 'fixtures', 'fake-codex.mjs');
-const KEYS = ['CODEX_CLI_PATH', 'FAKE_CODEX_LOG', 'CODEX_HOME'] as const;
+const KEYS = ['CODEX_CLI_PATH', 'FAKE_CODEX_LOG', 'CODEX_HOME', 'DS_CANON', 'DS_SKILLS'] as const;
 const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]));
 let logFile = '';
 
 beforeEach(() => {
 	chmodSync(FAKE, 0o755);
-	logFile = join(mkdtempSync(join(tmpdir(), 'fake-codex-')), 'log.jsonl');
+	const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
+	logFile = join(dir, 'log.jsonl');
 	process.env['CODEX_CLI_PATH'] = FAKE;
 	process.env['FAKE_CODEX_LOG'] = logFile;
+	// No canon, wherever this runs: a machine set up as AGENTS.md says has one at ~/Developer/canon.
+	process.env['DS_CANON'] = join(dir, 'no-canon');
+	process.env['DS_SKILLS'] = join(dir, 'no-skills');
 });
 afterEach(() => {
 	for (const k of KEYS) {
@@ -146,6 +152,17 @@ describe('Codex, the pieces', () => {
 		});
 		expect(toolCall({type: 'mcpToolCall', server: 'lsp', tool: 'find_symbol', arguments: {name_path_pattern: 'X'}})).toEqual({name: 'mcp__lsp__find_symbol', input: {name_path_pattern: 'X'}});
 		expect(toolCall({type: 'agentMessage', text: 'hi'})).toBeUndefined();
+		// A patch over several files, or one that deletes or moves a file, names each in its approval.
+		const patch = toolCall({
+			type: 'fileChange',
+			changes: [
+				{path: '/w/safe.txt', kind: {type: 'update', move_path: null}, diff: '@@\n-a\n+b'},
+				{path: '/w/sensitive.txt', kind: {type: 'delete', move_path: null}, diff: ''},
+				{path: '/w/old.ts', kind: {type: 'update', move_path: '/w/new.ts'}, diff: ''},
+			],
+		})!;
+		const {title, body} = askContent(patch.name, patch.input, '/w', 80);
+		expect([title, ...body.slice(0, 3).map(plain)]).toEqual(['Edit files', 'update safe.txt', 'delete sensitive.txt', 'update old.ts → new.ts']);
 		expect(toolOutput({type: 'commandExecution', status: 'completed', exitCode: 1, aggregatedOutput: 'boom'})).toEqual({text: 'boom', isError: true});
 		expect(toolOutput({type: 'mcpToolCall', error: {message: 'no index'}})).toEqual({text: 'no index', isError: true});
 	});

@@ -1,8 +1,9 @@
 // What the code tools know about a repo without a language server: its files, its import graph, its
 // entry points, and which lines the uncommitted changes touch.
 import {spawnSync} from 'node:child_process';
-import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs';
+import {existsSync, readdirSync, readFileSync, realpathSync, statSync} from 'node:fs';
 import {basename, join, posix} from 'node:path';
+import {within} from '../ds/py.js';
 import {type Language, languageOf} from './servers.js';
 
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'coverage', '.next', 'out', 'target']);
@@ -25,11 +26,28 @@ const isFile = (p: string): boolean => {
 	}
 };
 
+const real = (p: string): string | undefined => {
+	try {
+		return realpathSync.native(p);
+	} catch {
+		return undefined;
+	}
+};
+
+/** Whether p, followed through every symbolic link, is still inside root: a link in the repo can
+ *  point anywhere, and a tool that never asks must not read through it. */
+export function realWithin(root: string, p: string): boolean {
+	const r = real(root);
+	const q = real(p);
+	return r !== undefined && q !== undefined && within(r, q);
+}
+
 /** Every file in the repo, relative to root with / separators: git's list (tracked, and untracked but
- *  not ignored), or a walk that skips the usual dependency and build directories. */
+ *  not ignored), or a walk that skips the usual dependency and build directories. A link that leads
+ *  out of the repo is left out; the walk never follows links. */
 export function listFiles(root: string): string[] {
 	const out = git(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard');
-	if (out !== undefined) return [...new Set(out.split('\0').filter(f => f && isFile(join(root, f))))].sort();
+	if (out !== undefined) return [...new Set(out.split('\0').filter(f => f && isFile(join(root, f)) && realWithin(root, join(root, f))))].sort();
 	const files: string[] = [];
 	const walk = (dir: string) => {
 		for (const e of readdirSync(join(root, dir), {withFileTypes: true})) {
@@ -207,7 +225,8 @@ export type Changes = Map<string, [number, number][] | 'new' | 'deleted'>;
  *  or 'new' (added, or untracked and not ignored) or 'deleted'. Undefined when root is not in a git
  *  repository with a commit. */
 export function changedLines(root: string): Changes | undefined {
-	const diff = git(root, 'diff', '--unified=0', '--no-color', '--no-ext-diff', '--no-prefix', '--relative', 'HEAD');
+	// No external diff and no textconv: either would run a command git config names, from a tool that never asks.
+	const diff = git(root, 'diff', '--unified=0', '--no-color', '--no-ext-diff', '--no-textconv', '--no-prefix', '--relative', 'HEAD');
 	if (diff === undefined) return undefined;
 	const out: Changes = new Map();
 	let file: string | undefined;

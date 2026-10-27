@@ -1,6 +1,7 @@
 // A small client for the Language Server Protocol: JSON-RPC over the server's stdin and stdout, each
 // message framed by a Content-Length header. Requests get promised replies; the few requests a server
-// makes of its client are answered here; its notifications (diagnostics, logs, progress) are dropped.
+// makes of its client are answered here; of its notifications (diagnostics, logs, progress), only that
+// a file's diagnostics have arrived is kept.
 // Lines and columns are LSP's: zero-based, columns in UTF-16 units, which JavaScript strings index by.
 import {type ChildProcess, spawn} from 'node:child_process';
 import {readFileSync} from 'node:fs';
@@ -31,6 +32,9 @@ export type ServerSpec = {
 	languageId: (path: string) => string;
 	/** The answer to workspace/configuration for a section, when the server asks. */
 	settings?: (section: string) => unknown;
+	/** The server answers about the whole workspace only once it has published diagnostics for an open
+	 *  file; before that, from the open files alone (Pyright). */
+	settlesOnDiagnostics?: boolean;
 };
 
 type Message = {jsonrpc: '2.0'; id?: number | string; method?: string; params?: unknown; result?: unknown; error?: {code: number; message: string}};
@@ -47,6 +51,8 @@ export class LanguageServer {
 	private next = 1;
 	private waiting = new Map<number, {method: string; resolve: (v: unknown) => void; reject: (e: Error) => void}>();
 	private open = new Map<string, {version: number; text: string}>();
+	private diagnosedUris = new Set<string>();
+	private onDiagnosed = new Map<string, (() => void)[]>();
 	private stderr = '';
 	private stopped: string | undefined;
 	/** Resolves once the server has answered `initialize`; rejects if it never does. */
@@ -64,6 +70,8 @@ export class LanguageServer {
 			this.stopped = why;
 			for (const w of this.waiting.values()) w.reject(new ServerStopped(`${w.method}: ${why}`));
 			this.waiting.clear();
+			for (const done of [...this.onDiagnosed.values()].flat()) done(); // nothing more is coming
+			this.onDiagnosed.clear();
 		};
 		this.child.on('error', err => stop(`${spec.name} did not start: ${err.message}`));
 		this.child.on('exit', code => {
@@ -139,6 +147,19 @@ export class LanguageServer {
 		return uri;
 	}
 
+	/** Resolves once the server has published diagnostics for a file, or after `ms`, or when it stops. */
+	diagnosed(uri: string, ms = this.timeoutMs): Promise<void> {
+		if (this.diagnosedUris.has(uri) || this.stopped) return Promise.resolve();
+		return new Promise<void>(resolve => {
+			const t = setTimeout(done, ms);
+			function done() {
+				clearTimeout(t);
+				resolve();
+			}
+			this.onDiagnosed.set(uri, [...(this.onDiagnosed.get(uri) ?? []), done]);
+		});
+	}
+
 	/** Ask the server to shut down, then end the process. */
 	async stop(): Promise<void> {
 		if (this.stopped) return;
@@ -195,8 +216,18 @@ export class LanguageServer {
 			else w.resolve(m.result);
 			return;
 		}
-		if (m.id === undefined) return; // a notification: diagnostics, a log line, progress
+		if (m.id === undefined) {
+			// a notification: diagnostics, a log line, progress; only diagnostics' arrival matters
+			if (m.method === 'textDocument/publishDiagnostics') this.published(String((m.params as {uri?: string} | undefined)?.uri ?? ''));
+			return;
+		}
 		this.write({jsonrpc: '2.0', id: m.id, ...this.answer(m.method, m.params)});
+	}
+
+	private published(uri: string): void {
+		this.diagnosedUris.add(uri);
+		for (const done of this.onDiagnosed.get(uri) ?? []) done();
+		this.onDiagnosed.delete(uri);
 	}
 
 	/** The client's side of the protocol: settings when asked, nothing to register, no progress UI. */

@@ -12,9 +12,16 @@ export type Span = {
 };
 export type Row = Span[];
 
+/** Text as the terminal would show it, with every control character but tab and newline drawn as a
+ *  symbol (ESC as ␛) instead of obeyed. A model's or a tool's text could otherwise style itself:
+ *  `ESC[8m` hides what follows, so an approval could show `npm test` for `npm test && curl … | sh`.
+ *  Rows never carry escape codes of their own; colour is a role. */
+export const visible = (text: string): string =>
+	text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, c => (c <= '\u001f' ? String.fromCharCode(0x2400 + c.charCodeAt(0)) : c === '\u007f' ? '␡' : '�'));
+
 /** One span. `s('■', 'accent')`, `s('Bash', undefined, {bold: true})`. */
 export function s(text: string, role?: Role, opts: Omit<Span, 'text' | 'role'> = {}): Span {
-	return {text, role, ...opts};
+	return {text: visible(text), role, ...opts};
 }
 
 export const bold = (text: string, role?: Role): Span => s(text, role, {bold: true});
@@ -26,7 +33,7 @@ export function row(...parts: Content[]): Row {
 	const out: Row = [];
 	for (const p of parts) {
 		if (typeof p === 'string') {
-			if (p) out.push({text: p});
+			if (p) out.push({text: visible(p)});
 		} else if (Array.isArray(p)) {
 			out.push(...p);
 		} else {
@@ -90,6 +97,26 @@ export function splitAt(r: Row, w: number): [Row, Row] {
 		taken = 0;
 	}
 	return [head, tail];
+}
+
+/** Every line of `text`, broken every `w` cells and never cut: for a request a person approves, which
+ *  must reach them whole (canon gotcha-approvals). */
+export function breakLines(text: string, w: number): string[] {
+	const cells = Math.max(1, w);
+	return text.split('\n').flatMap(line => {
+		const out = [''];
+		let used = 0;
+		for (const ch of line) {
+			const cw = stringWidth(ch);
+			if (used + cw > cells && used > 0) {
+				out.push('');
+				used = 0;
+			}
+			out[out.length - 1] += ch;
+			used += cw;
+		}
+		return out;
+	});
 }
 
 /** Word-wrap a styled row to `w` cells, keeping each word's style. A span with a background (an

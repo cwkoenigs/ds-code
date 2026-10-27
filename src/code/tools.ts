@@ -8,7 +8,7 @@ import {z} from 'zod';
 import {within} from '../ds/py.js';
 import {type DsTool, ERROR_PREFIX, type Result} from '../ds/tools.js';
 import {type CallHierarchyItem, type DocumentSymbol, type IncomingCall, kindName, LanguageServer, type Location, type OutgoingCall, type Position, type Range, type SymbolInformation, toPath} from './lsp.js';
-import {changedLines, isRepo, languagesIn, listFiles, overview} from './repo.js';
+import {changedLines, isRepo, languagesIn, listFiles, overview, realWithin} from './repo.js';
 import {type Language, languageOf, serverSpec} from './servers.js';
 
 export const CODE_SERVER = 'code';
@@ -29,6 +29,7 @@ export type CodeSymbol = {name: string; qualified: string; kind: string; path: s
 const WITH_MEMBERS = new Set([2, 3, 5, 10, 11, 23]); // module, namespace, class, enum, interface, struct: their children are symbols too
 const MAX_LINES = 150;
 const MAX_CALLERS = 80;
+const SETTLE_MS = 30_000; // the longest a starting server is waited for before it answers as it can
 
 const isFile = (p: string): boolean => {
 	try {
@@ -58,7 +59,11 @@ export class CodeIntel {
 			await s.initialized;
 			// The TypeScript server learns the project from its first open file: give it one of the repo's.
 			const anchor = listFiles(this.root).find(f => languageOf(f) === lang && !f.endsWith('.d.ts'));
-			if (anchor) s.openFile(join(this.root, anchor));
+			if (anchor) {
+				const uri = s.openFile(join(this.root, anchor));
+				// Until Pyright has found the repo's files, it answers from the open ones: no symbol, or too few uses.
+				if (s.spec.settlesOnDiagnostics) await s.diagnosed(uri, SETTLE_MS);
+			}
 			return s;
 		})();
 		this.servers.set(lang, starting);
@@ -90,6 +95,7 @@ export class CodeIntel {
 		const p = resolve(this.root, path);
 		if (!within(this.root, p)) throw new InputError(`${path} is outside the repo`);
 		if (!isFile(p)) throw new InputError(`no file ${path}`);
+		if (!realWithin(this.root, p)) throw new InputError(`${path} is a link to a file outside the repo`);
 		return p;
 	}
 
@@ -99,28 +105,35 @@ export class CodeIntel {
 		return within(this.root, p) ? relative(this.root, p).split(sep).join('/') : p;
 	}
 
-	/** Where a location outside the repo's own code comes from; undefined for the repo's code. */
+	/** Where a location outside the repo's own code comes from; undefined for the repo's code. A file in
+	 *  the repo that is a link to one outside it is outside. */
 	external(uri: string): string | undefined {
 		const p = toPath(uri);
 		if (/typeshed|[\\/]lib\.[\w.]*\.d\.ts$/.test(p)) return 'the standard library'; // Pyright's stubs; TypeScript's lib.*.d.ts
 		if (/[\\/]node_modules[\\/]/.test(p)) return 'node_modules';
 		if (/site-packages|dist-packages/.test(p)) return 'site-packages';
-		return within(this.root, p) ? undefined : 'outside the repo';
+		return within(this.root, p) && realWithin(this.root, p) ? undefined : 'outside the repo';
 	}
 
-	/** Line n (1-based) of a file as written, or undefined past its end. */
+	/** Line n (1-based) of a file as written, or undefined past its end. Nothing from a file outside the
+	 *  repo but a library: a tool that never asks reads no further (canon gotcha-approvals). */
 	raw(path: string, n: number): string | undefined {
 		const abs = isAbsolute(path) ? path : join(this.root, path);
 		let lines = this.texts.get(abs);
 		if (!lines) {
 			try {
-				lines = readFileSync(abs, 'utf8').split('\n');
+				lines = this.external(abs) === 'outside the repo' ? [] : readFileSync(abs, 'utf8').split('\n');
 			} catch {
 				lines = [];
 			}
 			this.texts.set(abs, lines);
 		}
 		return lines[n - 1]?.replace(/\r$/, '');
+	}
+
+	/** Whether a location is somewhere the tools may show: the repo, or a library. */
+	private shown(uri: string): boolean {
+		return this.external(uri) !== 'outside the repo';
 	}
 
 	/** Line n of a file, trimmed and cut, for a listing. */
@@ -157,6 +170,7 @@ export class CodeIntel {
 	async symbols(abs: string): Promise<CodeSymbol[]> {
 		const lang = languageOf(abs);
 		if (!lang) throw new InputError(`${this.rel(abs)} is not TypeScript, JavaScript or Python`);
+		if (!this.shown(abs)) throw new InputError(`${this.rel(abs)} is a link to a file outside the repo`);
 		const s = await this.server(lang);
 		const uri = s.openFile(abs);
 		const res = await s.request<DocumentSymbol[] | SymbolInformation[] | null>('textDocument/documentSymbol', {textDocument: {uri}});
@@ -176,7 +190,7 @@ export class CodeIntel {
 		for (const lang of langs) {
 			const s = await this.server(lang);
 			const res = await s.request<SymbolInformation[] | null>('workspace/symbol', {query: name.split('.').pop() ?? name});
-			all.push(...this.flatten(res ?? [], '', []));
+			all.push(...this.flatten(res ?? [], '', []).filter(sym => this.shown(sym.uri))); // a tsconfig or a link can bring in files outside
 		}
 		const seen = new Set<string>();
 		const found = matches(all).filter(s => !seen.has(`${s.path}:${s.line}:${s.qualified}`) && seen.add(`${s.path}:${s.line}:${s.qualified}`));
@@ -200,7 +214,8 @@ export class CodeIntel {
 
 	async references(sym: CodeSymbol): Promise<Location[]> {
 		const s = await this.serverFor(sym);
-		return (await s.request<Location[] | null>('textDocument/references', {textDocument: {uri: sym.uri}, position: sym.position, context: {includeDeclaration: false}})) ?? [];
+		const refs = (await s.request<Location[] | null>('textDocument/references', {textDocument: {uri: sym.uri}, position: sym.position, context: {includeDeclaration: false}})) ?? [];
+		return refs.filter(l => this.shown(l.uri));
 	}
 
 	/** Locations by file, each line with its text. */
@@ -312,26 +327,43 @@ export class CodeIntel {
 				lines.push(`${file}  (symbols unavailable: ${(err as Error).message})`);
 				continue;
 			}
-			/** Where a symbol is used, by file, noting the files that depend on the change without being changed. */
-			const usesOf = async (sym: CodeSymbol) => {
+			/** Where a symbol is used, by file, noting the files that depend on the change without being changed;
+			 *  or why the server could not say, which is not the same as nowhere. */
+			const usesOf = async (sym: CodeSymbol): Promise<string[] | Error> => {
+				let refs: Location[];
+				try {
+					refs = await this.references(sym);
+				} catch (err) {
+					return err as Error;
+				}
 				const byFile = new Map<string, Set<number>>();
-				for (const r of await this.references(sym).catch(() => [] as Location[])) {
+				for (const r of refs) {
 					const p = this.rel(r.uri);
 					(byFile.get(p) ?? byFile.set(p, new Set()).get(p)!).add(r.range.start.line + 1);
 					if (!changes.has(p)) dependents.add(p);
 				}
 				return [...byFile].sort(([a], [b]) => a.localeCompare(b)).map(([p, ns]) => `${p}:${[...ns].sort((a, b) => a - b).join(',')}`);
 			};
-			const describe = (sym: CodeSymbol, used: string[]) =>
-				`  ${sym.kind} ${sym.qualified} (${sym.endLine > sym.line ? `${sym.line}-${sym.endLine}` : sym.line})  ${used.length ? 'used in ' + used.slice(0, 8).join('; ') + (used.length > 8 ? `; and ${used.length - 8} more files` : '') : 'used nowhere else'}`;
+			const describe = (sym: CodeSymbol, used: string[] | Error) =>
+				`  ${sym.kind} ${sym.qualified} (${sym.endLine > sym.line ? `${sym.line}-${sym.endLine}` : sym.line})  ${
+					used instanceof Error
+						? `uses unknown (${used.message})`
+						: used.length
+							? 'used in ' + used.slice(0, 8).join('; ') + (used.length > 8 ? `; and ${used.length - 8} more files` : '')
+							: 'used nowhere else'
+				}`;
 			if (change === 'new') {
 				// A new file's own uses of its symbols say nothing; what matters is whether other files use them.
 				const elsewhere: string[] = [];
+				let unknown = false;
 				for (const sym of syms.slice(0, 30)) {
-					const used = (await usesOf(sym)).filter(u => !u.startsWith(file + ':'));
-					if (used.length) elsewhere.push(describe(sym, used));
+					const used = await usesOf(sym);
+					if (used instanceof Error) unknown = true;
+					const other = used instanceof Error ? used : used.filter(u => !u.startsWith(file + ':'));
+					if (other instanceof Error || other.length) elsewhere.push(describe(sym, other));
 				}
-				lines.push(`${file}  new  (${plural(syms.length, 'symbol')}${syms.length ? (elsewhere.length ? ', used elsewhere:' : ', none used elsewhere') : ''})`, ...elsewhere);
+				const said = unknown ? ', not all uses known:' : elsewhere.length ? ', used elsewhere:' : ', none used elsewhere';
+				lines.push(`${file}  new  (${plural(syms.length, 'symbol')}${syms.length ? said : ''})`, ...elsewhere);
 				continue;
 			}
 			lines.push(`${file}  lines ${change.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(', ')}`);

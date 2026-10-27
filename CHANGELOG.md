@@ -8,6 +8,30 @@ the CLI started (`cwkoenigs/ds-next#N`).
 
 ## [Unreleased]
 
+### Fixed
+- The code tools no longer run a repo's own `.venv/bin/python`: Pyright was given it as its
+  interpreter and ran it, so a cloned repo could run code from a tool that never asks. Pyright now
+  gets the environment's package folders instead (local-011). (#5)
+- Pyright's first answers were short: until it has found the repo's files it answers from the open
+  ones, so a first `find_symbol` said "no symbol" and `references` missed other files' uses. The
+  first call now waits for it to settle (local-012). (#5)
+- `change_impact` said "used nowhere else" when a references lookup failed; it now says the uses are
+  unknown, and why. (#5)
+- Approvals show the whole request in both looks: Rule showed six lines of a command and Rail eight,
+  and long lines were cut. (#5)
+- A session that stopped while its approval was showing left that question unanswered, and every
+  later approval, in this session or the next, waited behind it until `rule` was restarted. A late
+  close from an ended session could also drop the next session. (#5)
+- A model's or a tool's escape codes reached the terminal: `ESC[8m` could hide the end of a command
+  in the approval. Control characters now show as symbols (`␛`) everywhere (local-013). (#5)
+- A Codex patch over several files asked about the first file only, and a delete read as an edit; the
+  approval now names every file and what happens to it. (#5)
+- The code tools read through links: a file in the repo linked to one outside it showed that file's
+  lines and symbols. They now show nothing outside the repo but libraries (local-014). (#5)
+- `change_impact` ran `git diff` with textconv on, so a diff driver in git config ran a command from
+  a tool that never asks. (#5)
+- `test/codex.test.tsx` assumed no canon on the machine; it now sets `DS_CANON` and `DS_SKILLS` itself. (#5)
+
 ### Added
 - README: updating with `npm ci` and why, prompts that reach each code tool and the first real
   answer, why the code tools rather than Serena or a code graph, and what does and doesn't leave the

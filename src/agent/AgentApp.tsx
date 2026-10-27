@@ -62,7 +62,9 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 
 	const session = useRef<AgentSession | null>(null);
 	const sessionId = useRef<string | undefined>(undefined);
-	const closing = useRef(false);
+	/** Counts the sessions ended: what an older session still sends (a question, its close) is stale. */
+	const generation = useRef(0);
+	const asking = useRef<Ask | null>(null); // the question on screen, for whoever ends its session
 	const interrupted = useRef(false);
 	const last = useRef<Last>('none');
 	const lastEvent = useRef(Date.now());
@@ -185,14 +187,17 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 	);
 
 	/** One question at a time: an agent can ask about parallel calls at once, and two prompts on one
-	 *  terminal would send an answer to the wrong one. */
+	 *  terminal would send an answer to the wrong one. A question from a session that has ended is
+	 *  declined without showing. */
 	const askPerson = useCallback(
-		(name: string, input: Record<string, unknown>) => {
+		(from: number, name: string, input: Record<string, unknown>) => {
 			const answered = askChain.current.then(
 				() =>
 					new Promise<Answer>(resolve => {
+						if (from !== generation.current) return resolve('no');
 						printRows(look.asking(name, input, w));
-						setAsk({name, input, resolve});
+						asking.current = {name, input, resolve};
+						setAsk(asking.current);
 						setMode('ask');
 					}),
 			);
@@ -202,24 +207,32 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 		[look, printRows, w],
 	);
 
+	/** A session that ends takes its questions with it: the one on screen is declined and those queued
+	 *  behind it never show. Left waiting, they would hold every later session's questions back. */
+	const endSession = () => {
+		generation.current++;
+		session.current = null;
+		asking.current?.resolve('no');
+		asking.current = null;
+		setAsk(null);
+	};
+
 	const ensureSession = useCallback(async (): Promise<AgentSession | null> => {
 		if (session.current) return session.current;
+		const mine = generation.current;
 		try {
 			session.current = await open({
 				backend,
 				cwd,
-				ask: askPerson,
+				ask: (name, input) => askPerson(mine, name, input),
 				onEvent,
 				model: model || undefined,
 				connection,
 				effort,
 				resume: sessionId.current, // after a crash or a stall, carry on the same conversation
 				onClose: () => {
-					session.current = null;
-					if (closing.current) {
-						closing.current = false; // we closed it ourselves
-						return;
-					}
+					if (mine !== generation.current) return; // we closed it ourselves, or a newer one runs now
+					endSession();
 					if (modeRef.current !== 'idle') {
 						block(look.failure(label, 'stopped; ask again to continue the same session', w));
 						endTurn();
@@ -234,10 +247,10 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 	}, [askPerson, backend, block, connection, cwd, effort, endTurn, label, look, model, onEvent, open, w]);
 
 	const closeSession = () => {
-		if (!session.current) return;
-		closing.current = true;
-		session.current.close();
-		session.current = null;
+		const ending = session.current;
+		if (!ending) return;
+		endSession();
+		ending.close();
 	};
 
 	const leave = () => {
@@ -366,6 +379,7 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 		lastEvent.current = Date.now(); // the watchdog does not count time spent deciding
 		if (a === 'no') interrupted.current = true; // a decline ends the turn; that is not a failure
 		ask.resolve(a);
+		asking.current = null;
 		setAsk(null);
 		setMode('turn');
 	};

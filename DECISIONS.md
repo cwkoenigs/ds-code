@@ -221,3 +221,109 @@ from its git history. Each is dated when it was made.
   uncommitted changes, and this repo; the Codex end-to-end test calls a code tool through the real
   app-server. 103 tests pass on Node 22.22 and 26.
 - **Review date:** each `typescript` or `pyright` upgrade.
+
+## local-011: Pyright gets a venv's package folders, never its python
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** An adversarial review found that `serverSpec` handed Pyright the repo's own
+  `.venv/bin/python` as `python.pythonPath`, and Pyright runs the interpreter it is given to learn
+  its search paths and version. Every code tool passes the permission gate without asking, so a
+  cloned repo that carries an executable `.venv/bin/python` ran its own code the first time an agent
+  looked up a Python symbol. `test/code.test.ts` reproduced it: the stand-in interpreter wrote its
+  marker file.
+- **Options considered:**
+  1. **Keep `pythonPath`, but only when it links to an interpreter outside the repo**: still runs
+     that interpreter with the repo's `site-packages`, whose `.pth` files may hold `import` lines,
+     which Python runs at start.
+  2. **Drop the venv**: nothing runs, but Pyright loses the project's installed packages, the
+     reason the venv was used (local-010).
+  3. **Give Pyright the venv's `site-packages` and the folders its `.pth` files add, as
+     `python.analysis.extraPaths`**: chosen. Pyright reads them; nothing in the repo runs.
+- **Decision:** `packagesIn` finds `lib/python*/site-packages` (or `Lib/site-packages` on
+  Windows) under `.venv` or `venv`, adds the path lines of its `.pth` files (editable installs) and
+  skips their `import` lines. Pyright gets no `pythonPath`, so for the standard library it runs
+  `python3` or `python` from the PATH, the person's own, with a script that drops the working
+  directory from `sys.path` before it imports anything.
+- **Consequences:** Imports resolve from the venv as before. Pyright now takes the Python version
+  from the PATH's interpreter, not the venv's, which matters only for version-gated stubs. A `.pth`
+  file's `import` lines (setuptools' editable finders) add nothing.
+- **Validation:** `test/code.test.ts` builds a project whose `.venv/bin/python` writes a marker:
+  imports from its `site-packages` resolve and the marker is never written. The same test fails on
+  the code before this change.
+- **Review date:** each `pyright` upgrade.
+
+## local-012: The first Pyright call waits for Pyright to find the repo
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Pyright answers requests made before it has found the repo's files from the open
+  files alone. A first `find_symbol` said "no symbol named greet", and `references` missed the
+  uses in files not yet open; `test/code.test.ts` failed on every run on the owner's Mac.
+  TypeScript's server loads its project while opening the first file, so its answers are whole at
+  once.
+- **Options considered:**
+  1. **Retry until an answer is non-empty**: an empty answer can be true, and a short list of
+     references is not empty.
+  2. **Wait for Pyright's progress notifications**: Pyright reports analysis progress, not the end
+     of finding files, and only when the client shows progress.
+  3. **Wait for the first diagnostics of the file opened at start**: chosen. Pyright publishes them
+     after it has logged "Found N source files", even for a file in an excluded folder.
+- **Decision:** `ServerSpec.settlesOnDiagnostics` marks Pyright; `CodeIntel.server` waits on
+  `LanguageServer.diagnosed` for the anchor file, at most 30 s, before the first answer. A server
+  that stops ends the wait.
+- **Consequences:** The first Python call takes as long as Pyright needs to find the repo's files
+  (about a quarter of a second for the fixture). If Pyright never publishes, the call waits 30 s and
+  then answers as it can.
+- **Validation:** `test/code.test.ts`'s Pyright test passes three runs in three, and failed three in
+  three before.
+- **Review date:** each `pyright` upgrade.
+
+## local-013: Control characters are drawn, not obeyed, where spans are made
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** The review's Codex pass showed that Ink passes SGR codes through: a command holding
+  `ESC[8m … ESC[28m` showed in the approval dialog as only what came before the conceal. Ink
+  already drops carriage returns, erase-line and the clipboard and title OSC sequences; it keeps
+  styles (SGR) and OSC 8 links.
+  Nothing in rule writes an escape code into a row: colour is a role, resolved by `theme.ts`.
+- **Options considered:**
+  1. **Strip control characters in the components, at render**: the rows' widths were measured
+     before, so frames would break wherever a span lost characters.
+  2. **Clean each untrusted source (model text, tool output, approval inputs)**: many entry points,
+     and a new one would be missed.
+  3. **Draw them as symbols in `s()` and `row()`, where every span is made**: chosen. Every builder
+     goes through them, widths are measured after, and the person sees that something was there.
+- **Decision:** `text.visible` turns C0 controls but tab and newline into Unicode control pictures
+  (ESC as `␛`), DEL into `␡` and C1 controls into `�`; `s()` and `row()` apply it.
+- **Consequences:** Model text, tool output and approvals can no longer style or move the terminal.
+  A tool's own coloured output shows its codes as `␛[31m`, which is what it held.
+- **Validation:** `test/agent.test.tsx` checks a concealing command in the dialog and an OSC 52 and
+  C1 sequence in the transcript; both failed before.
+- **Review date:** each Ink upgrade.
+
+## local-014: The code tools show nothing outside the repo but libraries
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** The tools checked paths by their spelling. A file in the repo that is a link to one
+  outside it (`src/leak.ts → ~/private.ts`) passed, and its lines and symbols came back from a tool
+  that never asks; TypeScript's server also finds such files through the repo's `tsconfig.json`. The
+  canon's gotcha-approvals asks that a read outside the project ask first.
+- **Options considered:**
+  1. **Check the path the model names, with its links followed**: closes the direct read, but the
+     servers still return the file's symbols and lines from their own scan.
+  2. **Ask before showing anything from outside the repo**: the code tools have no way to ask;
+     they pass the gate as reads.
+  3. **Treat a file reached through a link out of the repo as outside it, and show nothing from
+     outside but libraries**: chosen. One rule in `external()`, which every answer already uses.
+- **Decision:** `repo.realWithin` follows links on both sides. `listFiles` leaves out links that
+  lead out; `abs` refuses them by name; `external` calls them outside the repo; `raw` reads no line
+  from outside but `node_modules`, `site-packages` and the standard library; `locate` and
+  `references` drop locations outside.
+- **Consequences:** References from files outside the repo, which a `tsconfig.json` could include,
+  are no longer listed. Links inside the repo, and libraries wherever they are, are unchanged.
+- **Validation:** `test/code.test.ts` links a file outside the repo into it: `definition` refuses it,
+  and neither `find_symbol` nor `repo_overview` names it. The test failed before.
+- **Review date:** when a third language server is added.

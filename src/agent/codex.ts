@@ -106,17 +106,25 @@ export function shellCommand(cmd: string): string {
 const contentText = (content: unknown): string =>
 	Array.isArray(content) ? content.map(c => (c && typeof c === 'object' && 'text' in c ? String((c as Obj)['text']) : '')).filter(Boolean).join('\n') : '';
 
-/** A file change as rule reads tool calls: Edit (or Write for a new file), its path, its diff. */
+/** A file change as rule reads tool calls: Edit (or Write for a new file), its path, its diff. A patch
+ *  that changes several files, or deletes or moves one, also lists each file and what happens to it,
+ *  so the approval names every one. */
 function fileChange(changes: unknown): {name: string; input: Obj} {
 	const list = Array.isArray(changes) ? (changes as Obj[]) : [];
 	const first = list[0] ?? {};
 	const kind = (first['kind'] as Obj | undefined)?.['type'];
+	const files = list.map(c => {
+		const k = (c['kind'] as Obj | undefined) ?? {};
+		const to = str(k['move_path']);
+		return {kind: str(k['type']) || 'update', path: str(c['path']), ...(to ? {to} : {})};
+	});
+	const plain = files.length === 1 && (files[0]!.kind === 'add' || files[0]!.kind === 'update') && !files[0]!.to;
 	const diff = list.map(c => str(c['diff'])).join('\n');
 	const added = diff.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1));
 	const removed = diff.split('\n').filter(l => l.startsWith('-') && !l.startsWith('---')).map(l => l.slice(1));
 	return {
-		name: kind === 'add' ? 'Write' : 'Edit',
-		input: {file_path: str(first['path']), ...(list.length > 1 ? {description: `${list.length} files`} : {}), new_string: added.join('\n'), old_string: removed.join('\n'), content: added.join('\n')},
+		name: kind === 'add' && plain ? 'Write' : 'Edit',
+		input: {file_path: str(first['path']), ...(plain ? {} : {files}), new_string: added.join('\n'), old_string: removed.join('\n'), content: added.join('\n')},
 	};
 }
 
