@@ -1,13 +1,14 @@
 // The ds port on a small canon built here, as ds-next's tests build theirs (tests/conftest.py).
 // The full comparison with ds-next's Python on a real canon is test/parity/run.sh.
+import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {dirname, join} from 'node:path';
+import {dirname, join, sep} from 'node:path';
 import {beforeAll, describe, expect, it} from 'vitest';
 import {readOnlyIds} from '../src/agent/backend.js';
 import * as code from '../src/ds/code.js';
-import {Canon, CanonError, Skills} from '../src/ds/kb.js';
+import {Canon, CanonError, purePath, Skills} from '../src/ds/kb.js';
 import * as reconcile from '../src/ds/reconcile.js';
 import * as scaffold from '../src/ds/scaffold.js';
 import {runTool, tools} from '../src/ds/tools.js';
@@ -124,6 +125,15 @@ describe('scaffold.render', () => {
 	});
 });
 
+describe('paths as Python spells them', () => {
+	it("keeps a share's two leading separators, as Path does, and collapses three", () => {
+		const p = (...parts: string[]) => parts.join(sep);
+		expect(purePath('//server/share/canon')).toBe(sep + sep + p('server', 'share', 'canon')); // \\\\server\\share on Windows
+		expect(purePath('///a//b/./c/')).toBe(sep + p('a', 'b', 'c'));
+		expect(purePath('a/./b//')).toBe(p('a', 'b'));
+	});
+});
+
 describe('scaffold.write and reconcile', () => {
 	it('creates a committed repo with the pre-push hook, and refuses a non-empty directory', () => {
 		const {tmp, canon, skills} = setup();
@@ -134,6 +144,16 @@ describe('scaffold.write and reconcile', () => {
 		expect(() => scaffold.write(answers(), dest, canon, skills)).toThrow(/is not empty/);
 		const r = reconcile.check(dest, canon);
 		expect(r.summary()).toBe('demo-app: 3 adopted · 0 declined · 0 pending');
+	});
+
+	it('refuses a version written as a float, as ds-next does', () => {
+		const {tmp, canon, skills} = setup();
+		const dest = join(tmp, 'demo-app');
+		scaffold.write(answers(), dest, canon, skills, {withGit: false});
+		const path = join(dest, '.ds', 'manifest.toml');
+		const m = /\[standards\.([\w-]+)\]\nstatus = "adopted"\nversion = 1\n/.exec(readFileSync(path, 'utf8'))!;
+		writeFileSync(path, readFileSync(path, 'utf8').replace(m[0], m[0].replace('version = 1', 'version = 1.0')));
+		expect(reconcile.check(dest, canon).errors).toEqual([`${m[1]}: version must be a whole number from 1 up, not 1.0`]);
 	});
 
 	it('sees a newer standard as pending, and a broken pointer as an error', () => {
@@ -148,7 +168,64 @@ describe('scaffold.write and reconcile', () => {
 	});
 });
 
+describe('the Python that cuts canon code', () => {
+	const uv = spawnSync('uv', ['--version']).status === 0;
+
+	it('asks uv for one it already has: code_get only reads, so it never downloads a Python or goes online', () => {
+		const viaUv = code.pythonCandidates('/opt/uv/bin/uv').find(c => c[0] === '/opt/uv/bin/uv')!;
+		expect(viaUv).toEqual(['/opt/uv/bin/uv', 'run', '--no-project', '--quiet', '--no-python-downloads', '--offline', '--python', '>=3.10', 'python']);
+	});
+
+	// An older uv, or one with no Python 3.10+ of its own, fails here and code_get falls back to $DS_PYTHON or
+	// python3; this checks a uv that has both.
+	const usable = uv && /--no-python-downloads/.test(spawnSync('uv', ['run', '--help'], {encoding: 'utf8'}).stdout ?? '') && spawnSync('uv', ['python', 'find', '--no-python-downloads', '>=3.10']).status === 0;
+	it.skipIf(!usable)('still finds a Python with the installed uv, offline', () => {
+		const viaUv = code.pythonCandidates().find(c => c.includes('--no-python-downloads'))!;
+		const r = spawnSync(viaUv[0]!, [...viaUv.slice(1), '-I', '-c', 'import sys; print(sys.version_info >= (3, 10))'], {encoding: 'utf8'});
+		expect(r.status === 0 ? r.stdout.trim() : 'no Python 3.10+ that uv already has').toBe('True');
+	});
+});
+
 describe('canon code in a repo', () => {
+	it.skipIf(process.platform === 'win32')('writes no metadata through a link: pyproject.toml or the manifest pointing out of the repo', () => {
+		for (const rel of ['pyproject.toml', join('.ds', 'manifest.toml')]) {
+			const {tmp, canon, skills} = setup();
+			const dest = join(tmp, 'demo-app');
+			scaffold.write(answers(), dest, canon, skills, {withGit: false});
+			const outside = join(tmp, 'outside.toml');
+			writeFileSync(outside, readFileSync(join(dest, rel), 'utf8'));
+			rmSync(join(dest, rel));
+			symlinkSync(outside, join(dest, rel));
+			const before = readFileSync(outside, 'utf8');
+			expect(() => scaffold.addBlock(dest, 'block-demo', canon, 'Ann', '2026-10-25')).toThrow(/refusing to write .* is a symbolic link/);
+			expect(() => code.add(dest, ['block-demo:shout'], canon, 'Ann', '2026-10-25')).toThrow(/refusing to write .* is a symbolic link/);
+			expect(readFileSync(outside, 'utf8')).toBe(before);
+			expect(existsSync(join(dest, 'tests', 'test_demo_mod.py'))).toBe(false); // refused before anything was written
+		}
+	});
+
+	it('updates only the files the block wrote: never one in its way that is someone else\'s', () => {
+		const {tmp, skills} = setup();
+		const old = makeCanon(join(tmp, 'c1'));
+		const dest = join(tmp, 'demo-app');
+		scaffold.write(answers(), dest, old, skills, {withGit: false});
+		scaffold.addBlock(dest, 'block-demo', old, 'Ann', '2026-10-25');
+		const manifest = join(dest, '.ds', 'manifest.toml');
+		const listed = 'files = ["src/demo_app/demo_mod.py", "tests/test_demo_mod.py"]';
+		expect(readFileSync(manifest, 'utf8')).toContain(listed);
+		// as if v1 had written only its module, and the tests file were the person's own
+		writeFileSync(manifest, readFileSync(manifest, 'utf8').replace(listed, 'files = ["src/demo_app/demo_mod.py"]'));
+		writeFileSync(join(dest, 'tests', 'test_demo_mod.py'), 'mine = True\n');
+		const newer = makeCanon(join(tmp, 'c2'), {'block-demo': 2});
+		expect(() => scaffold.addBlock(dest, 'block-demo', newer)).toThrow('not updated: tests/test_demo_mod.py already exist and were not written by block-demo');
+		expect(readFileSync(join(dest, 'tests', 'test_demo_mod.py'), 'utf8')).toBe('mine = True\n');
+		// a table from before files were listed trusts its module and the tests that import it
+		writeFileSync(manifest, readFileSync(manifest, 'utf8').split('\n').filter(l => !l.startsWith('files = ')).join('\n'));
+		expect(() => scaffold.addBlock(dest, 'block-demo', newer)).toThrow('not updated: tests/test_demo_mod.py');
+		writeFileSync(join(dest, 'tests', 'test_demo_mod.py'), 'from demo_app.demo_mod import shout\n');
+		expect(scaffold.addBlock(dest, 'block-demo', newer).note).toBe('updated');
+	});
+
 	it('adds a block with its requirements, once', () => {
 		const {tmp, canon, skills} = setup();
 		const dest = join(tmp, 'demo-app');

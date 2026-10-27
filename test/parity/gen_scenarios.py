@@ -77,6 +77,14 @@ def m(body): return "[repo]\nname = \"case\"\ntags = [\"python\", \"package\", \
 R = [
  {"name": "missing", "manifest": None, "docs": {}},
  {"name": "not-toml", "manifest": "[repo\nname=", "docs": {}},
+ {"name": "float-versions", "manifest": m(f"""
+[standards.{sid}]
+status = "adopted"
+version = 1.0
+by = 2.0
+[blocks.{bk["id"]}]
+version = 1.0
+"""), "docs": {}},
  {"name": "no-repo", "manifest": "x = 1\n", "docs": {}},
  {"name": "bad-tags", "manifest": "[repo]\nname = \"\"\ntags = []\n[blocks]\nnope = 3\n", "docs": {}},
  {"name": "statuses", "manifest": m(f"""

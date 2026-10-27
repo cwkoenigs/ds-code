@@ -69,15 +69,15 @@ rule agent --agent claude --model claude-sonnet-5-5
 rule agent --agent codex            # or DS_AGENT=codex once, in your shell profile
 ```
 
-- **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does.
-- **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs.
+- **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does. Cortex Code runs a repo's own hooks (from its `.cortex` or `.claude` settings) and its SDK can't switch them off, so where a repo's settings define any, `rule` shows each command and asks before the session starts; a no starts nothing.
+- **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs. It reads your settings and the repo's `CLAUDE.md` as usual, but runs no hooks, yours or the repo's: a cloned repo's `.claude/settings.json` could otherwise run a command as the session starts, and `rule` has no trust prompt to ask first. Hooks your organisation manages still run.
 - **Codex** works with no CLI installed either: `rule` carries a pinned Codex (`@openai/codex`) and runs it as `codex app-server`, the protocol Codex's editor extensions use. It uses your normal Codex login (`~/.codex`). Codex asks before running a command that isn't a known read and before changing a file; those questions, and ds-next's writes, come to the same approval as with the other agents. Turns end with a token count, since Codex reports no cost. `CODEX_CLI_PATH` runs a different Codex binary instead.
 - **What you see:**
   - Thinking folds to `· Thought for 3s`.
   - Each tool shows as ▫ while it runs, then lands as ▪ with its result as a fact (`142 lines`, `+14 −1`).
   - Replies print as Rule Markdown: uppercase headings, code on the surface colour.
   - Each turn ends with `N tools  12.3s  $0.0123` (Cortex reports no cost).
-- **Approvals:** anything that writes a file or runs a command opens the approval dialog. `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and every `code` tool.
+- **Approvals:** anything that writes a file or runs a command opens the approval dialog, even when your Claude Code settings allow it (an `allow` rule, or a "don't ask again" saved there). `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and every `code` tool.
 - **Keys:** `esc` interrupts a turn, `ctrl-o` opens the last fold, and messages typed mid-turn are queued.
 - **Commands:** `/status`, `/model <name>`, `/clear` (new conversation) and `/exit` are local; any other `/command` goes to the agent.
 - **Stalls:** a turn silent for 10 minutes, outside an approval, is interrupted, as in ds-next. The next message carries on the same session.
@@ -105,7 +105,7 @@ Eight read-only tools answer what text search can't, from language servers that 
 | `callees` | What a function calls, in the repo and outside it |
 | `change_impact` | The uncommitted changes, symbol by symbol, and the files that depend on them without being changed |
 
-A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`, so references from files outside its `include` (this repo's tests, for instance) aren't found; Pyright uses the repo's `.venv` or `venv` for installed packages when there is one.
+A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`, so references from files outside its `include` (this repo's tests, for instance) aren't found; Pyright reads the packages in the repo's `.venv` or `venv` when there is one, and never runs its `python`.
 
 **Trying them.** You ask in words; the agent picks the tool. Some prompts that reach each one:
 
@@ -153,6 +153,8 @@ It runs ds-next's Python from a ds-next checkout: `DS_NEXT`, else `~/Developer/d
 Two differences are expected:
 - `canon_read` of an unknown id: ds-next's message carries extra quotes, a side effect of Python's `KeyError`.
 - A manifest that isn't valid TOML: the error is worded by a different parser.
+
+Any other difference fails the check (it exits 1). It needs ds-next with cwkoenigs/ds-next#6, where a block's manifest table lists its files and no metadata is written through a link, as here.
 
 **Where the port departs from ds-next, on purpose:**
 - **`adopt_repo` is offered to the agent.** ds-next defines it and its prompt tells the agent to use it, but it's missing from the tools ds-next registers.

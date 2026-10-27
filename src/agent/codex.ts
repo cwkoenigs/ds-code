@@ -27,6 +27,12 @@ export function codexCommand(): {command: string; args: string[]} {
 	}
 }
 
+/** How long a request waits for Codex's answer. A setting, so the tests can wait less. */
+export const codexLimits = {requestMs: 60_000};
+
+/** A request Codex did not answer in time. */
+export class RequestTimeout extends Error {}
+
 /** One JSON-RPC connection: requests out with promised replies, notifications and server requests in. */
 export class AppServer {
 	private next = 1;
@@ -36,14 +42,29 @@ export class AppServer {
 		private child: ChildProcess,
 		private onNotification: (method: string, params: Obj) => void,
 		private onRequest: (method: string, params: Obj) => Promise<unknown>,
+		private timeoutMs = codexLimits.requestMs,
 	) {
 		createInterface({input: child.stdout!}).on('line', line => this.receive(line));
 	}
 
+	/** A request and its reply. One that never comes fails after `timeoutMs`: a Codex that stays up but
+	 *  stops answering would otherwise hold the session's start, or an interrupt, for good. */
 	request<T = Obj>(method: string, params: Obj): Promise<T> {
 		const id = this.next++;
 		return new Promise<T>((resolve, reject) => {
-			this.waiting.set(id, {resolve: v => resolve(v as T), reject});
+			const timer = setTimeout(() => {
+				if (this.waiting.delete(id)) reject(new RequestTimeout(`Codex took longer than ${this.timeoutMs / 1000}s to answer ${method}`));
+			}, this.timeoutMs);
+			this.waiting.set(id, {
+				resolve: v => {
+					clearTimeout(timer);
+					resolve(v as T);
+				},
+				reject: e => {
+					clearTimeout(timer);
+					reject(e);
+				},
+			});
 			this.write({id, method, params});
 		});
 	}
@@ -106,17 +127,25 @@ export function shellCommand(cmd: string): string {
 const contentText = (content: unknown): string =>
 	Array.isArray(content) ? content.map(c => (c && typeof c === 'object' && 'text' in c ? String((c as Obj)['text']) : '')).filter(Boolean).join('\n') : '';
 
-/** A file change as rule reads tool calls: Edit (or Write for a new file), its path, its diff. */
+/** A file change as rule reads tool calls: Edit (or Write for a new file), its path, its diff. A patch
+ *  that changes several files, or deletes or moves one, also lists each file and what happens to it,
+ *  so the approval names every one. */
 function fileChange(changes: unknown): {name: string; input: Obj} {
 	const list = Array.isArray(changes) ? (changes as Obj[]) : [];
 	const first = list[0] ?? {};
 	const kind = (first['kind'] as Obj | undefined)?.['type'];
+	const files = list.map(c => {
+		const k = (c['kind'] as Obj | undefined) ?? {};
+		const to = str(k['move_path']);
+		return {kind: str(k['type']) || 'update', path: str(c['path']), ...(to ? {to} : {})};
+	});
+	const plain = files.length === 1 && (files[0]!.kind === 'add' || files[0]!.kind === 'update') && !files[0]!.to;
 	const diff = list.map(c => str(c['diff'])).join('\n');
 	const added = diff.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).map(l => l.slice(1));
 	const removed = diff.split('\n').filter(l => l.startsWith('-') && !l.startsWith('---')).map(l => l.slice(1));
 	return {
-		name: kind === 'add' ? 'Write' : 'Edit',
-		input: {file_path: str(first['path']), ...(list.length > 1 ? {description: `${list.length} files`} : {}), new_string: added.join('\n'), old_string: removed.join('\n'), content: added.join('\n')},
+		name: kind === 'add' && plain ? 'Write' : 'Edit',
+		input: {file_path: str(first['path']), ...(plain ? {} : {files}), new_string: added.join('\n'), old_string: removed.join('\n'), content: added.join('\n')},
 	};
 }
 
@@ -323,7 +352,12 @@ export async function openCodexSession(o: SessionOptions): Promise<AgentSession>
 			rpc
 				.request('turn/start', {threadId, input: [{type: 'text', text, text_elements: []}], ...(model ? {model} : {}), ...(o.effort ? {effort: o.effort} : {})})
 				.then(r => (turnId = str((r['turn'] as Obj)?.['id']) || turnId))
-				.catch((err: Error) => emit({kind: 'error', message: err.message}));
+				.catch((err: Error) => {
+					emit({kind: 'error', message: err.message});
+					// A turn Codex never confirmed may still be running: end the process, so nothing of it
+					// (an approval, a result) lands after rule has moved on. The next message resumes the thread.
+					if (err instanceof RequestTimeout) child.kill();
+				});
 		},
 		interrupt,
 		async setModel(m) {

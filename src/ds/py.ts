@@ -72,7 +72,8 @@ export function resolvePath(p: string): string {
 		head = up;
 	}
 	try {
-		head = realpathSync(head);
+		// Windows: the native call, which expands short names (C:\Users\RUNNER~1) as Python's resolve() does
+		head = process.platform === 'win32' ? realpathSync.native(head) : realpathSync(head);
 	} catch {
 		// keep it as given
 	}

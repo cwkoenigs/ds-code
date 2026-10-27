@@ -221,3 +221,216 @@ from its git history. Each is dated when it was made.
   uncommitted changes, and this repo; the Codex end-to-end test calls a code tool through the real
   app-server. 103 tests pass on Node 22.22 and 26.
 - **Review date:** each `typescript` or `pyright` upgrade.
+
+## local-011: Pyright gets a venv's package folders, never its python
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** An adversarial review found that `serverSpec` handed Pyright the repo's own
+  `.venv/bin/python` as `python.pythonPath`, and Pyright runs the interpreter it is given to learn
+  its search paths and version. Every code tool passes the permission gate without asking, so a
+  cloned repo that carries an executable `.venv/bin/python` ran its own code the first time an agent
+  looked up a Python symbol. `test/code.test.ts` reproduced it: the stand-in interpreter wrote its
+  marker file.
+- **Options considered:**
+  1. **Keep `pythonPath`, but only when it links to an interpreter outside the repo**: still runs
+     that interpreter with the repo's `site-packages`, whose `.pth` files may hold `import` lines,
+     which Python runs at start.
+  2. **Drop the venv**: nothing runs, but Pyright loses the project's installed packages, the
+     reason the venv was used (local-010).
+  3. **Give Pyright the venv's `site-packages` and the folders its `.pth` files add, as
+     `python.analysis.extraPaths`**: chosen. Pyright reads them; nothing in the repo runs.
+- **Decision:** `packagesIn` finds `lib/python*/site-packages` (or `Lib/site-packages` on
+  Windows) under `.venv` or `venv`, adds the path lines of its `.pth` files (editable installs) and
+  skips their `import` lines. Pyright gets no `pythonPath`, so for the standard library it runs
+  `python3` or `python` from the PATH, the person's own, with a script that drops the working
+  directory from `sys.path` before it imports anything.
+- **Consequences:** Imports resolve from the venv as before. Pyright now takes the Python version
+  from the PATH's interpreter, not the venv's, which matters only for version-gated stubs. A `.pth`
+  file's `import` lines (setuptools' editable finders) add nothing.
+- **Validation:** `test/code.test.ts` builds a project whose `.venv/bin/python` writes a marker:
+  imports from its `site-packages` resolve and the marker is never written. The same test fails on
+  the code before this change.
+- **Review date:** each `pyright` upgrade.
+
+## local-012: The first Pyright call waits for Pyright to find the repo
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Pyright answers requests made before it has found the repo's files from the open
+  files alone. A first `find_symbol` said "no symbol named greet", and `references` missed the
+  uses in files not yet open; `test/code.test.ts` failed on every run on the owner's Mac.
+  TypeScript's server loads its project while opening the first file, so its answers are whole at
+  once.
+- **Options considered:**
+  1. **Retry until an answer is non-empty**: an empty answer can be true, and a short list of
+     references is not empty.
+  2. **Wait for Pyright's progress notifications**: Pyright reports analysis progress, not the end
+     of finding files, and only when the client shows progress.
+  3. **Wait for the first diagnostics of the file opened at start**: chosen. Pyright publishes them
+     after it has logged "Found N source files", even for a file in an excluded folder.
+- **Decision:** `ServerSpec.settlesOnDiagnostics` marks Pyright; `CodeIntel.server` waits on
+  `LanguageServer.diagnosed`, at most 30 s, before the first answer: for the first diagnostics of any
+  file, since the anchor is the one file open and Pyright checks only open files. Not the anchor's
+  URI: on Windows Pyright spells it its own way (`file:///c%3A/...`), and the wait ran the full 30 s.
+  A server that stops ends the wait.
+- **Consequences:** The first Python call takes as long as Pyright needs to find the repo's files
+  (about a quarter of a second for the fixture). If Pyright never publishes, the call waits 30 s and
+  then answers as it can.
+- **Validation:** `test/code.test.ts`'s Pyright test passes three runs in three, and failed three in
+  three before.
+- **Review date:** each `pyright` upgrade.
+
+## local-013: Control characters are drawn, not obeyed, where spans are made
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** The review's Codex pass showed that Ink passes SGR codes through: a command holding
+  `ESC[8m … ESC[28m` showed in the approval dialog as only what came before the conceal. Ink
+  already drops carriage returns, erase-line and the clipboard and title OSC sequences; it keeps
+  styles (SGR) and OSC 8 links.
+  Nothing in rule writes an escape code into a row: colour is a role, resolved by `theme.ts`.
+- **Options considered:**
+  1. **Strip control characters in the components, at render**: the rows' widths were measured
+     before, so frames would break wherever a span lost characters.
+  2. **Clean each untrusted source (model text, tool output, approval inputs)**: many entry points,
+     and a new one would be missed.
+  3. **Draw them as symbols in `s()` and `row()`, where every span is made**: chosen. Every builder
+     goes through them, widths are measured after, and the person sees that something was there.
+- **Decision:** `text.visible` turns C0 controls but tab and newline into Unicode control pictures
+  (ESC as `␛`), DEL into `␡` and C1 controls into `�`; `s()` and `row()` apply it.
+- **Consequences:** Model text, tool output and approvals can no longer style or move the terminal.
+  A tool's own coloured output shows its codes as `␛[31m`, which is what it held.
+- **Validation:** `test/agent.test.tsx` checks a concealing command in the dialog and an OSC 52 and
+  C1 sequence in the transcript; both failed before.
+- **Review date:** each Ink upgrade.
+
+## local-014: The code tools show nothing outside the repo but libraries
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** The tools checked paths by their spelling. A file in the repo that is a link to one
+  outside it (`src/leak.ts → ~/private.ts`) passed, and its lines and symbols came back from a tool
+  that never asks; TypeScript's server also finds such files through the repo's `tsconfig.json`. The
+  canon's gotcha-approvals asks that a read outside the project ask first.
+- **Options considered:**
+  1. **Check the path the model names, with its links followed**: closes the direct read, but the
+     servers still return the file's symbols and lines from their own scan.
+  2. **Ask before showing anything from outside the repo**: the code tools have no way to ask;
+     they pass the gate as reads.
+  3. **Treat a file reached through a link out of the repo as outside it, and show nothing from
+     outside but libraries**: chosen. One rule in `external()`, which every answer already uses.
+- **Decision:** `repo.realWithin` follows links on both sides. `listFiles` leaves out links that
+  lead out; `abs` refuses them by name; `external` judges a location by its real path against the
+  repo's real root, and a library by a real library folder, never by a name; `raw` reads no line
+  from outside but `node_modules`, `site-packages` and the standard library; `locate` and
+  `references` drop locations outside, and `callers` and `callees` count them without naming them.
+- **Consequences:** References from files outside the repo, which a `tsconfig.json` could include,
+  are no longer listed. Links inside the repo, and libraries wherever they are, are unchanged.
+- **Validation:** `test/code.test.ts` links a file outside the repo into it: `definition` refuses it,
+  and neither `find_symbol` nor `repo_overview` names it. The test failed before.
+- **Review date:** when a third language server is added.
+
+## local-015: Claude sessions run no hooks
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Codex's review said a repo's `.claude/settings.json` permission rules could skip
+  `canUseTool`. A live probe on the owner's Mac (Agent SDK 0.3.310, Haiku) found that a project
+  `allow: ["Bash"]` still reached rule's gate, but a project `SessionStart` hook ran its command as
+  the session started, with nothing asked. `settingSources` includes `'project'` so the repo's
+  `CLAUDE.md` loads, and that loads the project's hooks too. Claude Code asks before trusting a
+  folder; the SDK has no such prompt, and neither does rule.
+- **Options considered:**
+  1. **`settings: {disableAllHooks: true}`**: chosen. The flag tier outranks project settings and
+     is not a policy tier, so an IT-managed tier does not drop it; managed hooks still run. The
+     user's own hooks stop running in `rule agent` too.
+  2. **Ask once per repo, as Claude Code does**: keeps the user's hooks, but needs a new prompt and
+     a stored list of trusted folders.
+  3. **Drop `'project'` from `settingSources`**: no project hooks, but no `CLAUDE.md`, project skills
+     or commands either.
+  4. **`managedSettings: {allowManagedHooksOnly: true}`**: worked in the probe, but the SDK drops
+     an embedder's managed settings where an IT-managed tier exists, as on work machines, silently.
+- **Decision:** the Claude session passes `settings: {disableAllHooks: true}`.
+- **Consequences:** No hook from the user, the project or local settings runs in `rule agent`;
+  `CLAUDE.md`, skills, commands and the permission gate are unchanged. Cortex Code runs a project's
+  hooks too, and cannot be stopped the same way (local-016); Codex's did not run (local-016).
+- **Validation:** `test/agent.test.tsx` starts the real Claude Code, with a home of its own, a fake
+  key and a dead address, in a folder whose settings define a `SessionStart` hook; the hook does not
+  run. On the code before this change it does.
+- **Review date:** each `@anthropic-ai/claude-agent-sdk` upgrade, and if people miss their hooks
+  (then option 2).
+
+## local-016: Cortex Code asks before it starts where a repo defines hooks
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** A live probe (Cortex Code 1.2.18, Cortex agent SDK) in a folder whose
+  `.cortex/settings.json` and `.claude/settings.json` define hooks: both `UserPromptSubmit` hooks
+  ran on the first prompt, with nothing asked. Codex 0.164.0 ran no project hook in the same test,
+  even with the project marked trusted and `codex_hooks` on; it keeps a per-hook trust store. A
+  repo's own `.cortex` or `.claude` permission rules did not skip rule's gate.
+- **Options considered:**
+  1. **`settingSources: ['user']`**: tried. The hooks still ran, and Cortex no longer read the
+     repo's `AGENTS.md` or `CLAUDE.md`.
+  2. **`--config` with `disableAllHooks: true`** (through the SDK's `extraArgs`): tried. The hooks
+     still ran.
+  3. **Show the person every hook and ask before the session starts**: chosen. The canon's
+     gotcha-approvals: commands always ask.
+- **Decision:** before a Cortex session, `projectHooks` reads `.cortex/settings{,.local}.json` and
+  `.claude/settings{,.local}.json` in the folder and at the repo's top. When any define hooks, the
+  approval dialog shows each event and command, whole, and any hook with more than a command
+  (`args`, an env) as its JSON. A no starts nothing and says to remove them or to use
+  `--agent claude`; a yes lasts while rule runs, until a settings file's text changes.
+- **Consequences:** Cortex in a repo with hooks costs one question per run of rule. A settings file
+  that names hooks but is not JSON is shown whole. Hooks Cortex reads from anywhere else are not
+  seen.
+- **Validation:** `test/agent.test.tsx` opens a Cortex session where `.cortex/settings.json` defines
+  a hook: the person is asked with the command, and a no starts nothing.
+- **Review date:** each `@snowflake/cortex-agent-sdk` upgrade: switch to its off switch when it has one.
+
+## local-017: No settings file lets a Claude tool skip the dialog
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Offline, with the real Claude Code and a stand-in Messages API
+  (`test/fixtures/fake-anthropic.ts`): with `permissions.allow: ["Bash"]` in the person's own
+  settings, a `Bash` command ran and rule never asked. A "don't ask again" saved in Claude Code is the
+  same kind of rule. The README, `AGENTS.md` and the canon's gotcha-approvals all say commands and
+  writes ask.
+- **Options considered:**
+  1. **Honour the person's rules, and say so**: fewer questions, but rule's one promise breaks for
+     anyone who has used Claude Code.
+  2. **`managedSettings: {allowManagedPermissionRulesOnly: true}`**: the SDK drops it on machines
+     with an IT-managed tier, as on work machines, silently.
+  3. **Drop `'user'` from `settingSources`**: also drops the person's `CLAUDE.md` and skills.
+  4. **A `PreToolUse` callback that answers "ask" for everything but Claude Code's reads**: chosen.
+     It runs under `disableAllHooks`, since it is not a settings-file hook, and "ask" sends the call
+     to `canUseTool`.
+- **Decision:** `askFirst` leaves `Read`, `Glob`, `Grep` and Claude Code's other read, plan and
+  hand-off tools as Claude Code decides, and rule's own read-only tools; every other tool, a new one
+  included, goes to the dialog.
+- **Consequences:** Allow rules in settings no longer save a question in `rule agent`; deny rules
+  still apply. Reads in the project still pass, and reads outside it still ask.
+- **Validation:** `test/agent.test.tsx`: with a user allow rule for `Bash`, the command asks and,
+  declined, does not run (it ran before); a `Read` in the project still does not ask.
+- **Review date:** each `@anthropic-ai/claude-agent-sdk` upgrade.
+
+## local-018: A block's manifest table lists the files it wrote
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Codex's review (#8): `addBlock` and `code.add` checked for files in the way only on
+  a first add, so an update that brought a new file replaced whatever was there. ds-next has the
+  same code. Nothing recorded which files a block wrote, and the manifest format is shared.
+- **Options considered:** compare contents (an older version's files are not in the canon); refuse
+  every existing file on update (every update would fail); record the files, in both repos: chosen.
+- **Decision:** as ds-next's local-002 (cwkoenigs/ds-next#6): each `[blocks.<id>]` table gains
+  `files = [...]`; an update replaces only those, or for an older table the recorded module and the
+  tests that import it (`scaffold.ownedFiles`).
+- **Consequences:** the parity check needs ds-next with that change; a manifest from before keeps
+  working, and its next update writes the list.
+- **Validation:** `test/ds.test.ts` and ds-next's `tests/test_blocks.py` check the same cases with
+  the same messages; parity against that branch: 0 unexpected differences, the `files` lines
+  compared.
+- **Review date:** when the manifest format next changes.

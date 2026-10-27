@@ -35,6 +35,9 @@ Both must pass before a change is done:
 - `npm test` (with a ds-next checkout at `DS_NEXT` or `~/Developer/ds-next`, the Rail token checks run
   too)
 
+CI (`.github/workflows/test.yml`) runs both on macOS and Windows, on Node 22.22 and 26, for every pull
+request.
+
 After changing anything in `src/ds/`, also run the parity check with ds-next:
 `DS_CANON=~/Developer/canon DS_SKILLS=~/Developer/skills-os sh test/parity/run.sh`.
 

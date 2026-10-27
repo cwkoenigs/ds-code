@@ -3,7 +3,7 @@
 import {useInput} from 'ink';
 import {useEffect, useRef, useState} from 'react';
 import * as b from '../builders.js';
-import type {Content, Row} from '../text.js';
+import {type Content, nextBoundary, prevBoundary, type Row} from '../text.js';
 import {SPINNER} from '../tokens.js';
 import {Lines} from './Lines.js';
 
@@ -94,12 +94,13 @@ export function useLineEditor({
 				return;
 			}
 			// Many terminals send DEL (0x7f) for the backspace key, which Ink reports as `delete`.
+			// By whole characters: half an emoji would be sent as a lone surrogate.
 			if (key.backspace || key.delete) {
-				set(s => (s.at ? {value: s.value.slice(0, s.at - 1) + s.value.slice(s.at), at: s.at - 1, selected: 0} : s));
+				set(s => (s.at ? {value: s.value.slice(0, prevBoundary(s.value, s.at)) + s.value.slice(s.at), at: prevBoundary(s.value, s.at), selected: 0} : s));
 				return;
 			}
-			if (key.leftArrow) return set(s => ({...s, at: Math.max(0, s.at - 1)}));
-			if (key.rightArrow) return set(s => ({...s, at: Math.min(s.value.length, s.at + 1)}));
+			if (key.leftArrow) return set(s => ({...s, at: prevBoundary(s.value, s.at)}));
+			if (key.rightArrow) return set(s => ({...s, at: nextBoundary(s.value, s.at)}));
 			if (key.ctrl && input === 'a') return set(s => ({...s, at: 0}));
 			if (key.ctrl && input === 'e') return set(s => ({...s, at: s.value.length}));
 			if (key.ctrl && input === 'u') return set(EMPTY);

@@ -41,7 +41,9 @@ flowchart TD
    Codex's thread items and turn notifications to the same events.
 5. **Asking.** Before a tool runs, the SDK calls `permissionGate`; Codex sends an approval request,
    or calls the ds tool, and `codex.ts` puts it through the same gate. Reads in the allowlist pass at
-   once; anything else goes to `AgentApp.askPerson`, one question at a time, and the look draws it.
+   once; anything else goes to `AgentApp.askPerson`, one question at a time, and the look draws it,
+   whole. A session that ends takes its questions with it: the one showing is declined and the ones
+   queued behind it never show, and nothing an ended session sends afterwards touches the next.
 6. **Drawing.** For each event `AgentApp` asks the look for rows (`text`, `toolStart`, `toolEnd`,
    `ending`...) and prints them to the transcript. Only the running tools, the spinner and the box
    redraw.
@@ -52,6 +54,9 @@ flowchart TD
 
 - **A line is data.** A `Row` is a list of `Span`s, each with a colour role (`text.ts`). Builders return
   rows; components only render them. Tests measure every row without a terminal.
+- **Text never styles itself.** `s()` and `row()` draw control characters as symbols (ESC as `␛`), so
+  a model's or a tool's `ESC[8m` cannot hide part of a command from the person approving it. Rows
+  carry no escape codes of their own; colour is a role.
 - **Colour is a role, never a hex value in a builder.** Palettes live in `tokens.ts` (Rule) and
   `rail/tokens.ts` (Rail); `theme.ts` resolves them at truecolor, ANSI-16 or no colour.
 - **Nothing printed is reprinted.** The transcript goes through Ink's `<Static>` (`components/transcript.tsx`);
@@ -61,17 +66,29 @@ flowchart TD
 - **The grid.** Frames are exactly the width they're given; other rows fit inside it. Rule draws at the
   terminal's width (60 at least); Rail draws its transcript at 60 to 80 and its box and toolbar at the
   terminal's width, as ds-next does.
+- **An approval shows the whole request.** Commands, paths, URLs and other tools' arguments are
+  broken to the dialog's width (`text.breakLines`), never cut or cut short, in both looks: the canon's
+  gotcha-approvals, after a long command hid its tail.
 - **Keys read state from refs.** A key can reach a handler from an older render. The line editor, the
   dialog and the Rail approval keep what was typed in a ref every key updates at once.
 - **Two files know the agent.** `agent/backend.ts` loads the Claude or Cortex SDK; `agent/codex.ts`
   drives Codex. The rest sees `AgentEvent`s and an `AgentSession`.
+- **A repo cannot run commands through the agent's settings.** Claude sessions load the user's and
+  the project's settings (for `CLAUDE.md`) with `disableAllHooks`, so a cloned repo's
+  `.claude/settings.json` hooks never run (local-015). Cortex Code runs a repo's hooks with no way
+  to stop it, so `openSession` shows them and asks before a Cortex session starts (local-016).
+- **No settings file skips the dialog.** A `PreToolUse` callback (`askFirst`) sends every Claude
+  tool but the reads to `canUseTool`, so an allow rule in the person's settings still asks (local-017).
 - **The ds tools are ds-next's.** `ds/` is a port of ds-next's Python with the same tool names,
   descriptions, arguments and outputs. `test/parity/run.sh` runs both through 229 steps on a real
   canon and compares everything. Reads never ask; writes always do.
 - **The code tools answer from language servers rule ships.** `code/` starts TypeScript 7's server and
   Pyright from rule's own `node_modules`, on the first call that needs one, and stops them with the
   session. Nothing is installed on the machine beyond `npm install`, and nothing leaves it. Every code
-  tool reads; none asks.
+  tool reads; none asks. So none runs anything the repo carries: Pyright is given a `.venv`'s
+  package folders, never its `python`, which Pyright would run, and `git diff` runs with no external
+  diff and no textconv. And none reads outside the repo but a library: a file reached through a link
+  out of the repo is outside it (`repo.realWithin`).
 - **Missing pieces never crash.** No canon: each tool says what to set up. A language server that
   stops is started again on the next call; one that takes too long says so. No Cortex CLI: said at
   once, since its SDK would hang.
@@ -158,8 +175,8 @@ flowchart TD
 | File | Holds |
 |---|---|
 | `src/code/tools.ts` | The eight `code` tools (`find_symbol`, `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview`, `change_impact`) and `CodeIntel`, which asks the servers and shapes the answers |
-| `src/code/lsp.ts` | `LanguageServer`: a small LSP client over stdio (Content-Length framing, requests, the client's answers to the server) and `openFile` |
-| `src/code/servers.ts` | Which server reads which file, and how to start each from rule's `node_modules`: TypeScript 7's `tsc --lsp`, Pyright's `pyright-langserver`; the project's `.venv` for Pyright |
+| `src/code/lsp.ts` | `LanguageServer`: a small LSP client over stdio (Content-Length framing, requests, the client's answers to the server), `openFile`, and `diagnosed` for when a file's diagnostics arrive |
+| `src/code/servers.ts` | Which server reads which file, and how to start each from rule's `node_modules`: TypeScript 7's `tsc --lsp`, Pyright's `pyright-langserver`; the project's `.venv` package folders for Pyright (`packagesIn`), never its python |
 | `src/code/repo.ts` | What needs no server: the repo's files (`git ls-files`), its import graph and entry points for `repo_overview`, the lines `git diff` says changed for `change_impact` |
 
 ### Tests
@@ -175,6 +192,7 @@ flowchart TD
 | `test/codex.test.tsx` | Codex against a stand-in app-server, drawn in Rail, and end to end with the real app-server and a stand-in model; `rule mcp` |
 | `test/fixtures/fake-codex.mjs` | A stand-in for `codex app-server`: one scripted turn with a ds tool call and a command approval |
 | `test/fixtures/fake-model.ts` | A stand-in for the model API Codex calls, so the real app-server plays a turn with no account |
+| `test/fixtures/fake-anthropic.ts` | A stand-in for Anthropic's Messages API, so the real Claude Code plays a turn with no account and no network |
 | `test/fixtures/code-ts/package.json`, `test/fixtures/code-ts/tsconfig.json`, `test/fixtures/code-ts/src/greet.ts`, `test/fixtures/code-ts/src/main.ts` | A small TypeScript project for the code tools: `greet`, `shout` which calls it, `run` which calls both |
 | `test/fixtures/code-py/pyproject.toml`, `test/fixtures/code-py/pkg/__init__.py`, `test/fixtures/code-py/pkg/greet.py`, `test/fixtures/code-py/pkg/main.py` | The same project in Python |
 | `test/architecture.test.ts` | That this page names every file, and names no file that is gone |
@@ -233,11 +251,14 @@ the repo carries that config (`.codex/config.toml`, `.mcp.json`; needs `rule` on
   thing that leaves the machine is what the agent itself sends its model.
 - **Starting and stopping.** A server starts on the first tool call for its language and stays for
   the session; `rule agent` and `rule mcp` stop them when the session ends. The first call loads the
-  project: under a second here, a few seconds on a large repo.
+  project: under a second here, a few seconds on a large repo. Pyright answers from its open files
+  alone until it has found the rest, so the first call waits for its first diagnostics, which come
+  once it has (30 s at most).
 - **What each server sees.** TypeScript's follows the nearest `tsconfig.json`: files outside its
   `include` (this repo's tests, for instance) are read when asked about directly, but references
   from them to `src/` are not found. Pyright resolves the repo's own modules always, and installed
-  packages when the repo has a `.venv` or `venv` (uv's and venv's places) or `python` is on the PATH.
+  packages when the repo has a `.venv` or `venv` (uv's and venv's places: their `site-packages` and
+  the folders its `.pth` files add, read, never run) or `python` is on the PATH.
 - **Codex** reads `.codex/config.toml`, once you trust the project (Codex asks the first time you open
   it). `codex mcp list` shows `ds`. When `rule agent` runs Codex, it switches that server off, since it
   serves the same tools itself.

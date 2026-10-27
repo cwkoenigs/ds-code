@@ -3,30 +3,37 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {render} from 'ink-testing-library';
+import {spawn} from 'node:child_process';
 import {chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {AgentApp} from '../src/agent/AgentApp.js';
 import {type Answer, chooseBackend, LABELS, openSession} from '../src/agent/backend.js';
-import {codexCommand, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
+import {AppServer, codexCommand, codexLimits, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
 import type {AgentEvent} from '../src/agent/events.js';
 import {RAIL} from '../src/agent/looks.js';
+import {askContent} from '../src/agent/present.js';
+import {plain} from '../src/text.js';
 import {mcpServer} from '../src/agent/mcp.js';
 import {tools as dsTools} from '../src/ds/tools.js';
 import {fakeModel, modelConfig} from './fixtures/fake-model.js';
 import {ENTER, ready, tick, until} from './helpers.js';
 
 const FAKE = join(import.meta.dirname, 'fixtures', 'fake-codex.mjs');
-const KEYS = ['CODEX_CLI_PATH', 'FAKE_CODEX_LOG', 'CODEX_HOME'] as const;
+const KEYS = ['CODEX_CLI_PATH', 'FAKE_CODEX_LOG', 'CODEX_HOME', 'DS_CANON', 'DS_SKILLS', 'FAKE_CODEX_SILENT_TURN'] as const;
 const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]));
 let logFile = '';
 
 beforeEach(() => {
 	chmodSync(FAKE, 0o755);
-	logFile = join(mkdtempSync(join(tmpdir(), 'fake-codex-')), 'log.jsonl');
+	const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
+	logFile = join(dir, 'log.jsonl');
 	process.env['CODEX_CLI_PATH'] = FAKE;
 	process.env['FAKE_CODEX_LOG'] = logFile;
+	// No canon, wherever this runs: a machine set up as AGENTS.md says has one at ~/Developer/canon.
+	process.env['DS_CANON'] = join(dir, 'no-canon');
+	process.env['DS_SKILLS'] = join(dir, 'no-skills');
 });
 afterEach(() => {
 	for (const k of KEYS) {
@@ -139,6 +146,32 @@ describe('Codex, the pieces', () => {
 		expect(dynamicTool(t)).toMatchObject({type: 'function', name: 'canon_read', inputSchema: {type: 'object', properties: {id: {type: 'string'}}}});
 	});
 
+	it('gives up on a request Codex never answers, instead of waiting for good', async () => {
+		const silent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio: ['pipe', 'pipe', 'pipe']});
+		try {
+			const rpc = new AppServer(silent, () => {}, async () => null, 200);
+			await expect(rpc.request('initialize', {})).rejects.toThrow('Codex took longer than 0.2s to answer initialize');
+		} finally {
+			silent.kill();
+		}
+	});
+
+	it.skipIf(process.platform === 'win32')('ends a session whose turn Codex never confirms, so nothing of that turn lands later', async () => {
+		process.env['FAKE_CODEX_SILENT_TURN'] = '1'; // the stand-in plays the turn but never answers turn/start
+		codexLimits.requestMs = 300;
+		try {
+			const {s, events, closed} = await session('yes');
+			s.send('go');
+			await until(() => String(closed()), v => v === 'true');
+			expect(events.find(e => e.kind === 'error')).toMatchObject({message: 'Codex took longer than 0.3s to answer turn/start'});
+			const seen = events.length;
+			await tick(500);
+			expect(events.length).toBe(seen); // the process is gone: no approval or result of that turn arrives
+		} finally {
+			codexLimits.requestMs = 60_000;
+		}
+	});
+
 	it('reads Codex items as rule reads tool calls', () => {
 		expect(toolCall({type: 'fileChange', changes: [{path: 'src/a.ts', kind: {type: 'update', move_path: null}, diff: '@@\n-old\n+new\n+more'}]})).toEqual({
 			name: 'Edit',
@@ -146,6 +179,17 @@ describe('Codex, the pieces', () => {
 		});
 		expect(toolCall({type: 'mcpToolCall', server: 'lsp', tool: 'find_symbol', arguments: {name_path_pattern: 'X'}})).toEqual({name: 'mcp__lsp__find_symbol', input: {name_path_pattern: 'X'}});
 		expect(toolCall({type: 'agentMessage', text: 'hi'})).toBeUndefined();
+		// A patch over several files, or one that deletes or moves a file, names each in its approval.
+		const patch = toolCall({
+			type: 'fileChange',
+			changes: [
+				{path: '/w/safe.txt', kind: {type: 'update', move_path: null}, diff: '@@\n-a\n+b'},
+				{path: '/w/sensitive.txt', kind: {type: 'delete', move_path: null}, diff: ''},
+				{path: '/w/old.ts', kind: {type: 'update', move_path: '/w/new.ts'}, diff: ''},
+			],
+		})!;
+		const {title, body} = askContent(patch.name, patch.input, '/w', 80);
+		expect([title, ...body.slice(0, 3).map(plain)]).toEqual(['Edit files', 'update safe.txt', 'delete sensitive.txt', 'update old.ts → new.ts']);
 		expect(toolOutput({type: 'commandExecution', status: 'completed', exitCode: 1, aggregatedOutput: 'boom'})).toEqual({text: 'boom', isError: true});
 		expect(toolOutput({type: 'mcpToolCall', error: {message: 'no index'}})).toEqual({text: 'no index', isError: true});
 	});
@@ -179,6 +223,9 @@ describe('rule mcp', () => {
 		expect(tools).toHaveLength(26);
 		const hint = (n: string) => tools.find(t => t.name === n)!.annotations?.readOnlyHint;
 		expect([hint('canon_read'), hint('rule_spec'), hint('scaffold_project'), hint('capture')]).toEqual([true, true, false, false]);
+		// Only the writes that add say so; a client may skip asking about an additive one.
+		const destructive = tools.filter(t => t.annotations?.destructiveHint).map(t => t.name).sort();
+		expect(destructive).toEqual(['adopt_repo', 'block_add', 'code_add']);
 		const r = await c.callTool({name: 'rule_spec', arguments: {section: 'principles'}});
 		expect(r.isError).toBe(false);
 		expect((r.content as {text: string}[])[0]!.text).toContain('The grid shows');

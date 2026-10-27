@@ -9,7 +9,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Canon, type CodeSymbol, jsonStr} from './kb.js';
 import {pyJsonDumps, pyRepr, resolvePath, today as todayIso, which} from './py.js';
-import {addRequirements, ExistsError, gitUser, inside, InputError, repoPackage, setBlockTable} from './scaffold.js';
+import {addRequirements, ExistsError, gitUser, inside, InputError, ownedFiles, repoPackage, setBlockTable} from './scaffold.js';
 
 const STOP = new Set(['a', 'an', 'the', 'to', 'of', 'in', 'on', 'for', 'and', 'or', 'is', 'it', 'that', 'with', 'i', 'need', 'want', 'how', 'do', 'from', 'into', 'by', 'be', 'as', 'at', 'my', 'some', 'this', 'safely']);
 
@@ -52,17 +52,22 @@ export function search(canon: Canon, query: string, limit = 8): CodeSymbol[] {
 const HELPER = fileURLToPath(new URL('../../python/code_cut.py', import.meta.url));
 let python: string[] | null | undefined; // undefined: not looked for yet; null: none found
 
-/** A Python 3.10+ to run the cut with: $DS_PYTHON, then uv, then python3, python, py -3. */
-function findPython(): string[] | null {
-	if (python !== undefined) return python;
-	const uv = which('uv');
-	const candidates: string[][] = [
+/** The ways to run a Python 3.10+ for the cut, in order: $DS_PYTHON, then uv, then python3, python,
+ *  py -3. uv uses a Python it already has: code_get only reads, so it must never download and install
+ *  one, or go online at all. */
+export function pythonCandidates(uv = which('uv')): string[][] {
+	return [
 		...(process.env['DS_PYTHON'] ? [[process.env['DS_PYTHON']]] : []),
-		...(uv ? [[uv, 'run', '--no-project', '--quiet', '--python', '>=3.10', 'python']] : []),
+		...(uv ? [[uv, 'run', '--no-project', '--quiet', '--no-python-downloads', '--offline', '--python', '>=3.10', 'python']] : []),
 		...['python3', 'python'].flatMap(c => (which(c) ? [[which(c)!]] : [])),
 		...(process.platform === 'win32' && which('py') ? [[which('py')!, '-3']] : []),
 	];
-	for (const c of candidates) {
+}
+
+/** A Python 3.10+ to run the cut with, the first of pythonCandidates that is one. */
+function findPython(): string[] | null {
+	if (python !== undefined) return python;
+	for (const c of pythonCandidates()) {
 		const r = spawnSync(c[0]!, [...c.slice(1), '-I', '-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'], {encoding: 'utf8', timeout: 120_000});
 		if (r.status === 0) return (python = c);
 	}
@@ -171,10 +176,9 @@ export function add(repoIn: string, ids: string[], canon = new Canon(), by?: str
 		const p = pieces(canon, allIds, pkg).get(bid)!;
 		const files: Record<string, string> = {[p.code[0]]: p.code[1], ...Object.fromEntries(p.tests)};
 		const targets = Object.fromEntries(Object.keys(files).map(rel => [rel, inside(repo, rel)]));
-		if (!prior) {
-			const clash = Object.keys(targets).filter(rel => existsSync(targets[rel]!));
-			if (clash.length) throw new ExistsError(`not added: ${clash.join(', ')} already exist and were not written from ${bid}`);
-		}
+		const owned = prior ? ownedFiles(prior, targets, pkg, canon.blocks.get(bid)!.module) : new Set<string>();
+		const clash = Object.keys(targets).filter(rel => existsSync(targets[rel]!) && !owned.has(rel));
+		if (clash.length) throw new ExistsError(`not ${prior ? 'updated' : 'added'}: ${clash.join(', ')} already exist and were not written from ${bid}`);
 		for (const [rel, text] of Object.entries(files)) {
 			mkdirSync(join(targets[rel]!, '..'), {recursive: true});
 			writeFileSync(targets[rel]!, text);
@@ -187,7 +191,8 @@ export function add(repoIn: string, ids: string[], canon = new Canon(), by?: str
 		const table =
 			`[blocks.${bid}]\nversion = ${b.version}\nby = ${jsonStr(by ?? gitUser())}\n` +
 			`on = "${today}"\nmodule = ${jsonStr(p.code[0])}\n` +
-			`symbols = [${p.symbols.map(jsonStr).join(', ')}]\n`;
+			`symbols = [${p.symbols.map(jsonStr).join(', ')}]\n` +
+			`files = [${Object.keys(files).sort().map(jsonStr).join(', ')}]\n`;
 		manifestText = setBlockTable(manifestText, bid, table);
 		done.push({block: bid, symbols: p.symbols, files: Object.keys(files).sort(), requires: added, manual, note: prior ? 'updated' : 'added'});
 	}

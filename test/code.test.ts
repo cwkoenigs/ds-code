@@ -1,15 +1,17 @@
 // The code tools against the real language servers rule ships: a small TypeScript project, a small
 // Python one, a git repo with uncommitted changes, and this repo itself. And the pieces on their own.
 import {execFileSync} from 'node:child_process';
-import {cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import {chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {afterAll, describe, expect, it} from 'vitest';
+import {afterAll, describe, expect, it, vi} from 'vitest';
 import {readOnlyIds} from '../src/agent/backend.js';
 import {toolCall} from '../src/agent/codex.js';
 import {importsIn, resolveImport} from '../src/code/repo.js';
-import {languageOf, pyrightCommand, typescriptCommand} from '../src/code/servers.js';
-import {CODE_TOOL_NAMES, codeTools} from '../src/code/tools.js';
+import {languageOf, packagesIn, pyrightCommand, typescriptCommand} from '../src/code/servers.js';
+import {LanguageServer, toUri} from '../src/code/lsp.js';
+import {CODE_TOOL_NAMES, CodeIntel, codeTools} from '../src/code/tools.js';
+import {tick} from './helpers.js';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 const ROOT = join(import.meta.dirname, '..');
@@ -57,6 +59,16 @@ describe('the code tools on a TypeScript project', () => {
 		expect(map).toContain('imported by nothing: src/main.ts');
 	});
 
+	it('starts one server for calls that arrive together', async () => {
+		const code = new CodeIntel(join(FIXTURES, 'code-ts'));
+		try {
+			const [a, b] = await Promise.all([code.server('typescript'), code.server('typescript')]);
+			expect(a).toBe(b); // a second would never be stopped
+		} finally {
+			await code.close();
+		}
+	});
+
 	it('says what is wrong as an ERROR the model can act on', async () => {
 		expect(await run('find_symbol', {name: 'nothing'})).toEqual({text: 'ERROR: no symbol named "nothing" in the repo', error: true});
 		expect((await run('file_symbols', {path: '../code-py/pkg/greet.py'})).text).toBe('ERROR: ../code-py/pkg/greet.py is outside the repo');
@@ -74,6 +86,33 @@ describe('the code tools on a Python project', () => {
 		expect((await run('callers', {name: 'greet', depth: 1})).text).toContain('  shout  pkg/greet.py:5  (line 6)\n  run  pkg/main.py:4  (line 5)');
 		expect((await run('callees', {name: 'shout'})).text).toBe('shout (pkg/greet.py:5) calls:\n  greet  pkg/greet.py:1  (line 6)\n  from the standard library: upper');
 		expect((await run('definition', {path: 'pkg/main.py', line: 5, name: 'greet'})).text).toBe('greet is defined at pkg/greet.py:1  def greet(name: str) -> str:');
+	});
+});
+
+describe("a Python project's own virtual environment", () => {
+	const dir = mkdtempSync(join(tmpdir(), 'code-venv-'));
+	cpSync(join(FIXTURES, 'code-py'), dir, {recursive: true});
+	const site = process.platform === 'win32' ? join(dir, '.venv', 'Lib', 'site-packages') : join(dir, '.venv', 'lib', 'python3.12', 'site-packages');
+	mkdirSync(join(site, 'extra'), {recursive: true});
+	writeFileSync(join(site, 'extra', '__init__.py'), 'VALUE = 1\n');
+	mkdirSync(join(dir, 'libs', 'local'), {recursive: true}); // an editable install, as uv writes one
+	writeFileSync(join(site, '_local.pth'), `# editable\n${join(dir, 'libs', 'local')}\nimport os; os.system('exit 1')\n${join(dir, 'missing')}\n`);
+	writeFileSync(join(dir, 'pkg', 'uses_extra.py'), 'from extra import VALUE\n\nprint(VALUE)\n');
+	// A repo can carry its own interpreter; running it would run the repo's code from a tool that only reads.
+	const ran = join(dir, 'ran');
+	mkdirSync(join(dir, '.venv', 'bin'), {recursive: true});
+	writeFileSync(join(dir, '.venv', 'bin', 'python'), `#!/bin/sh\ntouch '${ran}'\n`, {mode: 0o755});
+	const run = open(dir);
+
+	it('gives Pyright its packages and the folders its .pth files add, not their import lines', () => {
+		expect(packagesIn(dir)).toEqual([site, join(dir, 'libs', 'local')]);
+	});
+
+	it.skipIf(process.platform === 'win32')('resolves imports from it, and never runs its python', async () => {
+		// Ask until Pyright answers about the whole project: by then it has run any interpreter it was given.
+		for (let i = 0; i < 100 && !(await run('find_symbol', {name: 'greet'})).text.includes('pkg/greet.py:1'); i++) await tick(100);
+		expect((await run('definition', {path: 'pkg/uses_extra.py', line: 3, name: 'VALUE'})).text).toContain('extra');
+		expect(existsSync(ran)).toBe(false);
 	});
 });
 
@@ -102,10 +141,111 @@ describe('change_impact in a git repo', () => {
 		expect(report).toContain('Use the changed symbols but are not changed themselves: src/main.ts');
 	});
 
+	it("says a symbol's uses are unknown when the server could not say, never that there are none", async () => {
+		const code = new CodeIntel(dir);
+		code.references = async () => {
+			throw new Error('the TypeScript language server took longer than 60s to answer textDocument/references');
+		};
+		try {
+			const report = await code.impact();
+			expect(report).toContain('src/greet.ts  lines 2\n  function greet (1-3)  uses unknown (the TypeScript language server took longer than 60s to answer textDocument/references)');
+			expect(report).toContain('src/extra.ts  new  (1 symbol, not all uses known:)\n  variable EXTRA (1)  uses unknown (');
+			expect(report).not.toContain('used nowhere else');
+		} finally {
+			await code.close();
+		}
+	});
+
 	it('is an error outside a git repo', async () => {
 		const plain = mkdtempSync(join(tmpdir(), 'code-plain-'));
 		cpSync(join(FIXTURES, 'code-ts'), plain, {recursive: true});
 		expect((await open(plain)('change_impact')).text).toBe(`ERROR: ${plain} is not a git repository`);
+	});
+});
+
+describe('the code tools never run or read what a repo points them at', () => {
+	const env = {...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example'};
+
+	it("change_impact runs no textconv a repo's git config names", async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-textconv-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		const git = (...args: string[]) => execFileSync('git', args, {cwd: dir, env, stdio: 'pipe'});
+		const ran = join(dir, 'ran');
+		writeFileSync(join(dir, '.gitattributes'), '*.txt diff=conv\n');
+		writeFileSync(join(dir, 'notes.txt'), 'one\n');
+		git('init', '-q');
+		git('config', 'diff.conv.textconv', `touch '${ran}'; cat`);
+		git('add', '-A');
+		git('commit', '-q', '-m', 'base');
+		writeFileSync(join(dir, 'notes.txt'), 'two\n');
+		expect((await open(dir)('change_impact')).text).toContain('Not code: notes.txt');
+		expect(existsSync(ran)).toBe(false);
+	});
+
+	it.skipIf(process.platform === 'win32')('reads no file through a link that leads out of the repo', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-link-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		const secret = join(mkdtempSync(join(tmpdir(), 'code-secret-')), 'private.ts');
+		writeFileSync(secret, "export const TOKEN = 'one';\nconst second = 'private line';\n");
+		symlinkSync(secret, join(dir, 'src', 'leak.ts'));
+		const run = open(dir);
+		const asked = await run('definition', {path: 'src/leak.ts', line: 2, name: 'missing'});
+		expect(asked.text).toBe('ERROR: src/leak.ts is a link to a file outside the repo');
+		expect((await run('find_symbol', {name: 'TOKEN'})).text).not.toContain('leak.ts');
+		expect((await run('repo_overview')).text).not.toContain('leak.ts');
+	});
+
+	it.skipIf(process.platform === 'win32')("calls nothing a library because of its name: a link named like typeshed is still outside", async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-libname-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		const secret = join(mkdtempSync(join(tmpdir(), 'code-secret-')), 'private.ts');
+		writeFileSync(secret, "export const SECRET_NAME = 'one';\n");
+		symlinkSync(secret, join(dir, 'src', 'typeshed-leak.ts'));
+		const found = (await open(dir)('find_symbol', {name: 'SECRET_NAME'})).text;
+		expect(found).not.toContain('typeshed-leak');
+		expect(found).not.toContain("'one'");
+	});
+
+	it.skipIf(process.platform === 'win32')('knows the repo by its real path: a server may report /private/var for /var, or a link to the repo', () => {
+		const real = mkdtempSync(join(tmpdir(), 'code-real-'));
+		cpSync(join(FIXTURES, 'code-ts'), real, {recursive: true});
+		const link = join(mkdtempSync(join(tmpdir(), 'code-via-')), 'repo');
+		symlinkSync(real, link);
+		const code = new CodeIntel(link);
+		const reported = toUri(join(realpathSync(real), 'src', 'greet.ts'));
+		expect([code.external(reported), code.rel(reported)]).toEqual([undefined, 'src/greet.ts']);
+	});
+
+	it('names no caller in a file outside the repo that a tsconfig brings in, and says how many there are', async () => {
+		const parent = mkdtempSync(join(tmpdir(), 'code-tsconfig-'));
+		const dir = join(parent, 'repo');
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		mkdirSync(join(parent, 'private', 'src'), {recursive: true});
+		writeFileSync(join(parent, 'private', 'src', 'secret.ts'), "import {greet} from '../../repo/src/greet.js';\n\nexport function secretCaller(): string {\n\treturn greet('x');\n}\n");
+		writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({...JSON.parse(readFileSync(join(dir, 'tsconfig.json'), 'utf8')), include: ['src', '../private/src']}));
+		const run = open(dir);
+		const callers = (await run('callers', {name: 'greet', path: 'src/greet.ts', depth: 1})).text;
+		expect(callers).not.toContain('secretCaller');
+		expect(callers).not.toContain('private');
+		expect(callers).toContain('and 1 caller in files outside the repo, not shown');
+		expect(callers).toContain('shout  src/greet.ts:5');
+	});
+
+	it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('stops a server whose start fails after it is up: an unreadable first file', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-eacces-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		writeFileSync(join(dir, 'src', 'a-first.ts'), 'export const A = 1;\n'); // the file the server is shown first
+		chmodSync(join(dir, 'src', 'a-first.ts'), 0o000);
+		const stop = vi.spyOn(LanguageServer.prototype, 'stop');
+		const code = new CodeIntel(dir);
+		try {
+			await expect(code.server('typescript')).rejects.toThrow(/EACCES/);
+			expect(stop).toHaveBeenCalledTimes(1);
+		} finally {
+			stop.mockRestore();
+			chmodSync(join(dir, 'src', 'a-first.ts'), 0o644);
+			await code.close();
+		}
 	});
 });
 

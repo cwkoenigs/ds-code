@@ -1,8 +1,8 @@
 // How an agent's tool calls read in Rule: a short name, the one argument that matters, a result
 // as a fact (142 lines, +14 −1), and what the approval dialog says.
-import {join, relative} from 'node:path';
+import {join, relative, sep} from 'node:path';
 import * as b from '../builders.js';
-import {bold, type Row, s} from '../text.js';
+import {bold, breakLines, type Row, s} from '../text.js';
 
 /** Cortex names tools in lowercase (bash, web_fetch); Claude Code in PascalCase (Bash, WebFetch). */
 const NAMES: Record<string, string> = {
@@ -41,7 +41,7 @@ export function toolArgs(name: string, input: Record<string, unknown>, cwd: stri
 		case 'Edit':
 		case 'MultiEdit':
 		case 'NotebookEdit':
-			return path ? relative(cwd, path) || path : '';
+			return path ? relative(cwd, path).split(sep).join('/') || path : '';
 		case 'Grep':
 		case 'Glob':
 			return oneLine(str(input, 'pattern', 'query'));
@@ -96,10 +96,11 @@ export function landed(name: string, input: Record<string, unknown>, cwd: string
 export function askContent(name: string, input: Record<string, unknown>, cwd: string, w: number): {title: string; body: Row[]} {
 	const shown = displayName(name);
 	const fit = (t: string) => oneLine(t, w - 6);
+	// What will run, or where it writes or fetches from, is never cut: a long command hid its tail once.
+	const whole = (t: string, role?: 'muted'): Row[] => breakLines(t, w - 6).map(l => [role ? s(l, role) : bold(l)]);
 	switch (shown) {
 		case 'Bash': {
-			const cmd = str(input, 'command', 'cmd');
-			const body: Row[] = cmd.split('\n').slice(0, 6).map(l => [bold(fit(l))]);
+			const body: Row[] = whole(str(input, 'command', 'cmd'));
 			const why = str(input, 'description');
 			if (why) body.push([s(fit(why), 'muted')]);
 			return {title: 'Bash command', body};
@@ -109,13 +110,19 @@ export function askContent(name: string, input: Record<string, unknown>, cwd: st
 		case 'Write':
 		case 'NotebookEdit': {
 			const {first} = resultSummary(name, input, '', false);
-			return {title: shown === 'Write' ? 'Write file' : 'Edit file', body: [[bold(fit(toolArgs(name, input, cwd)))], [s(first, 'muted')]]};
+			// Codex's patches can change several files, or delete or move one: each, as it will happen.
+			const files = Array.isArray(input['files']) ? (input['files'] as {kind?: string; path?: string; to?: string}[]) : [];
+			const rel = (p = '') => relative(cwd, p).split(sep).join('/') || p;
+			const where = files.length ? files.flatMap(f => whole(`${f.kind ?? 'update'} ${rel(f.path)}${f.to ? ` → ${rel(f.to)}` : ''}`)) : whole(toolArgs(name, input, cwd));
+			return {title: files.length > 1 ? 'Edit files' : shown === 'Write' ? 'Write file' : 'Edit file', body: [...where, [s(first, 'muted')]]};
 		}
 		case 'WebFetch':
-			return {title: 'Fetch', body: [[bold(fit(str(input, 'url')))], [s(fit(str(input, 'prompt')), 'muted')]]};
+			return {title: 'Fetch', body: [...whole(str(input, 'url')), [s(fit(str(input, 'prompt')), 'muted')]]};
+		case 'Hooks': // a repo's own hooks, before a Cortex Code session starts there
+			return {title: "This repo's hooks", body: [...whole(str(input, 'command')), [s(fit(str(input, 'description')), 'muted')]]};
 		// ds's own writes say what they will create, in the person's terms
 		case 'scaffold_project': {
-			const where = relative(cwd, join(str(input, 'directory') || cwd, str(input, 'name'))) || str(input, 'name');
+			const where = relative(cwd, join(str(input, 'directory') || cwd, str(input, 'name'))).split(sep).join('/') || str(input, 'name');
 			return {
 				title: 'Create project',
 				body: [[bold(fit(where))], [s(fit(`${str(input, 'scaffold')} v${String(input['scaffold_version'] ?? '?')}  ${str(input, 'purpose')}`), 'muted')]],
@@ -131,7 +138,7 @@ export function askContent(name: string, input: Record<string, unknown>, cwd: st
 			return {title: 'Capture draft', body: [[bold(fit(str(input, 'title')))], [s('writes a proposed standard to .ds/captures for review', 'muted')]]};
 		default: {
 			const json = JSON.stringify(input);
-			return {title: shown.replace(/_/g, ' '), body: [[bold(shown)], [s(fit(json === '{}' ? 'no arguments' : json), 'muted')]]};
+			return {title: shown.replace(/_/g, ' '), body: [[bold(shown)], ...whole(json === '{}' ? 'no arguments' : json, 'muted')]};
 		}
 	}
 }
