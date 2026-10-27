@@ -4,6 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {setTimeout as tick} from 'node:timers/promises';
 import {afterAll, describe, expect, it, vi} from 'vitest';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
@@ -11,9 +12,8 @@ import {LanguageServer, toUri} from '../src/lsp.js';
 import {mcpServer} from '../src/mcp.js';
 import {importsIn, resolveImport} from '../src/repo.js';
 import {languageOf, packagesIn, pyrightCommand, typescriptCommand} from '../src/servers.js';
-import {CODE_TOOL_NAMES, CodeIntel, codeTools} from '../src/tools.js';
+import {CodeIntel, codeTools} from '../src/tools.js';
 
-const tick = (ms = 20) => new Promise(r => setTimeout(r, ms));
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 const ROOT = join(import.meta.dirname, '..');
 
@@ -114,6 +114,24 @@ describe("a Python project's own virtual environment", () => {
 		for (let i = 0; i < 100 && !(await run('find_symbol', {name: 'greet'})).text.includes('pkg/greet.py:1'); i++) await tick(100);
 		expect((await run('definition', {path: 'pkg/uses_extra.py', line: 3, name: 'VALUE'})).text).toContain('extra');
 		expect(existsSync(ran)).toBe(false);
+	});
+});
+
+describe('a file no tsconfig includes', () => {
+	// The fixture's tsconfig includes src alone; a test beside it is outside every project.
+	const project = (git: boolean) => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-outside-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		mkdirSync(join(dir, 'test'));
+		writeFileSync(join(dir, 'test', 'uses.ts'), "import {greet} from '../src/greet.js';\n\nexport function check(): boolean {\n\treturn greet('x') === 'hello x';\n}\n");
+		if (git) execFileSync('git', ['init', '-q'], {cwd: dir, stdio: 'pipe'}); // untracked files are searched too
+		return open(dir);
+	};
+
+	it.each([['outside git', false], ['in a git repo', true]])('still has its uses found, %s', async (_, git) => {
+		const run = project(git);
+		expect((await run('references', {name: 'greet'})).text).toContain('test/uses.ts\n     4  return greet(\'x\') === \'hello x\';');
+		expect((await run('callers', {name: 'greet'})).text).toContain('check  test/uses.ts:3  (line 4)');
 	});
 });
 
@@ -269,7 +287,8 @@ describe('the code tools, the pieces', () => {
 		await c.connect(client);
 		expect(c.getServerVersion()?.name).toBe('code');
 		const {tools} = await c.listTools();
-		expect(tools.map(x => x.name).sort()).toEqual([...CODE_TOOL_NAMES].sort());
+		expect(tools.map(x => x.name).sort()).toEqual(codeTools(FIXTURES).tools.map(x => x.name).sort());
+		expect(tools).toHaveLength(8);
 		expect(tools.every(x => x.annotations?.readOnlyHint === true && x.annotations?.destructiveHint === false)).toBe(true);
 		const r = await c.callTool({name: 'repo_overview', arguments: {}});
 		expect(r.isError).toBe(false);

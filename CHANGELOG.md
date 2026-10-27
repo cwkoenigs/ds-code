@@ -15,9 +15,12 @@ it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI starte
   `src/`, and the package and command are `ds-code`. (#6)
 
 ### Fixed
-- `references` found no use in this repo's tests: TypeScript's server reads only what `tsconfig.json`
-  includes, which was `src`. `tsconfig.json` now covers the tests too, so typecheck reads them as well,
-  and `tsconfig.build.json` compiles `src` alone. (#6)
+- `references` and `callers` missed uses in TypeScript files no `tsconfig.json` includes, such as a
+  repo's tests: TypeScript's server searches only the projects it has loaded. They now open the repo's
+  files that mention the name first, in any repo. This repo's `tsconfig.json` also covers its tests,
+  so typecheck reads them; `tsconfig.build.json` compiles `src` alone. (#6)
+- `ds-code mcp` kept running, with its language servers, after the agent closed stdin, so every
+  session end waited for the agent to give up on it. It now stops on the end of stdin or SIGTERM. (#6)
 
 ### Fixed
 - On Windows, found by the first CI run: `scaffold_project` refused every new project, since its path

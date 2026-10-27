@@ -71,10 +71,10 @@ hangs up.
 | "who calls changedLines?" | `callers` |
 | "what would my uncommitted changes break?" | `change_impact` |
 
-**What each server sees.** TypeScript's follows the nearest `tsconfig.json`, so a repo's uses of a
-symbol in files outside its `include` are not found: tests are the usual case. Put them in
-`tsconfig.json` (and compile from a `tsconfig.build.json`), as this repo does. Pyright reads the
-packages in the repo's `.venv` or `venv` when there is one, and never runs its `python`.
+**What each server sees.** TypeScript's reads one `tsconfig.json`'s files, so before `references` and
+`callers` ds-code also opens the repo's files that mention the name: uses in tests or scripts that no
+`tsconfig.json` includes are found too. Pyright reads every Python file in the repo, and the packages
+in its `.venv` or `venv` when there is one; it never runs the repo's `python`.
 
 **With the canon.** The canon's `code_search`, `code_get` and `code_add` (from `ds-next mcp`) answer
 "has the team already written this?", across repos; these tools answer "what is in this repo, and what
@@ -97,9 +97,9 @@ local-010 weighs the options.
 ## Checks
 
 ```sh
-npm test           # 25 tests: the tools against the real servers on a small TypeScript project, a small
-                   # Python one, a git repo with changes and this repo (its tests included); the MCP
-                   # server; that nothing the repo carries runs and nothing outside it is read; and that
+npm test           # 27 tests: the tools against the real servers on a small TypeScript project, a small
+                   # Python one, a file no tsconfig includes, a git repo with changes and this repo; the MCP
+                   # server and that it stops on hang-up; that nothing the repo carries runs and nothing outside it is read; and that
                    # ARCHITECTURE.md names every file
 npm run typecheck  # the source and the tests
 ```

@@ -14,8 +14,14 @@ An agent starts it itself; README.md says how for ds-next, Codex, Claude Code an
 
 const [cmd, dir] = process.argv.slice(2);
 if (cmd === 'mcp') {
+	const server = mcpServer(resolve(dir ?? '.'));
+	// An agent hangs up by closing stdin, then, after a wait, with SIGTERM: either stops the language
+	// servers and lets the process end. The SDK's transport does not watch for the end of stdin itself.
+	const stop = () => void server.close();
+	process.stdin.once('end', stop);
+	process.once('SIGTERM', stop);
 	// stdout carries the protocol from here on; nothing else may print to it.
-	await mcpServer(resolve(dir ?? '.')).connect(new StdioServerTransport());
+	await server.connect(new StdioServerTransport());
 } else if (cmd === '-v' || cmd === '--version') {
 	console.log(VERSION);
 } else {

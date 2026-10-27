@@ -2,6 +2,6 @@
   // What ships: src only. tsconfig.json also covers the tests, so typecheck reads them and the
   // TypeScript language server sees their uses of src.
   "extends": "./tsconfig.json",
-  "compilerOptions": {"noEmit": false, "rootDir": "src", "outDir": "dist", "declaration": false, "sourceMap": false},
+  "compilerOptions": {"noEmit": false, "rootDir": "src", "outDir": "dist"},
   "include": ["src"]
 }

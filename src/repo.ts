@@ -11,7 +11,7 @@ export const within = (outer: string, inner: string): boolean => inner === outer
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'coverage', '.next', 'out', 'target']);
 
 /** git's stdout for a command in root, or undefined when it fails (not a repo, no commits, no git). */
-export function git(root: string, ...args: string[]): string | undefined {
+function git(root: string, ...args: string[]): string | undefined {
 	try {
 		const r = spawnSync('git', args, {cwd: root, encoding: 'utf8', maxBuffer: 64 << 20});
 		return r.status === 0 ? r.stdout : undefined;
@@ -20,7 +20,7 @@ export function git(root: string, ...args: string[]): string | undefined {
 	}
 }
 
-const isFile = (p: string): boolean => {
+export const isFile = (p: string): boolean => {
 	try {
 		return statSync(p).isFile();
 	} catch {
@@ -64,6 +64,20 @@ export function listFiles(root: string): string[] {
 	};
 	walk('');
 	return files.sort();
+}
+
+/** The repo's files that mention `name` as a whole word: `git grep` in a repo (no textconv, as for
+ *  `git diff`), else a read of each file. */
+export function mentioning(root: string, name: string): string[] {
+	if (isRepo(root)) return (git(root, 'grep', '-l', '-z', '-w', '-F', '--untracked', '-e', name) ?? '').split('\0').filter(Boolean);
+	const word = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w$])`);
+	return listFiles(root).filter(f => {
+		try {
+			return word.test(readFileSync(join(root, f), 'utf8'));
+		} catch {
+			return false;
+		}
+	});
 }
 
 /** The languages the repo has files in. */
@@ -122,7 +136,7 @@ const TEST_PATH = /(^|\/)(tests?|__tests__|spec|fixtures?)(\/|$)|\.(test|spec)\.
 type Graph = {imports: Map<string, Set<string>>; importers: Map<string, Set<string>>; mainGuard: Set<string>};
 
 /** The import graph among the repo's own files. */
-export function importGraph(root: string, files: string[]): Graph {
+function importGraph(root: string, files: string[]): Graph {
 	const set = new Set(files);
 	const top = [...new Set(files.map(f => f.split('/')[0]!).filter(d => !d.includes('.')))];
 	const pythonRoots = ['', 'src', ...top];
@@ -149,7 +163,7 @@ export function importGraph(root: string, files: string[]): Graph {
 }
 
 /** Entry points the manifests name: package.json's bin and main, pyproject's [project.scripts]. */
-export function declaredEntries(root: string, files: Set<string>): string[] {
+function declaredEntries(root: string, files: Set<string>): string[] {
 	const out: string[] = [];
 	try {
 		const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {bin?: string | Record<string, string>; main?: string};
@@ -224,7 +238,7 @@ export function overview(root: string): string {
 
 // ── the uncommitted changes ──────────────────────────────────────────────────
 
-export type Changes = Map<string, [number, number][] | 'new' | 'deleted'>;
+type Changes = Map<string, [number, number][] | 'new' | 'deleted'>;
 
 /** What differs from HEAD, per file under root: the 1-based line ranges changed in the working tree,
  *  or 'new' (added, or untracked and not ignored) or 'deleted'. Undefined when root is not in a git

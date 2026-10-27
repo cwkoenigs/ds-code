@@ -458,8 +458,10 @@ from its git history. Each is dated when it was made.
 - **Consequences:** Until ds-next drives Codex, `rule agent` on rule-cli's main is the only terminal
   for Codex, so main changes only when ds-next can. The repo is renamed on GitHub with this pull
   request; GitHub redirects the old name, so rule-cli's clones, remotes and links keep working.
-  `tsconfig.json` covers the tests, so `references` sees them; other repos need the same for theirs.
-- **Validation:** `npm run typecheck` (source and tests); `npm test`, 25 tests, including the MCP
-  server's tools and annotations and `references` finding uses in the tests.
+  `references` and `callers` open the files that mention a name before asking TypeScript's server, so
+  uses outside every `tsconfig.json` (tests, scripts) are found in any repo.
+- **Validation:** `npm run typecheck` (source and tests); `npm test`, 27 tests, including the MCP
+  server's tools and annotations and uses found in a file no tsconfig includes. Closing its stdin ends
+  ds-code and its language server.
 - **Review date:** when ds-next's `code` server is in use at work.
 

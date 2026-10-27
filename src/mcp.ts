@@ -2,13 +2,13 @@
 // not ask about any of them.
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {createRequire} from 'node:module';
-import {CODE_SERVER, codeTools} from './tools.js';
+import {codeTools} from './tools.js';
 
 export const VERSION = (createRequire(import.meta.url)('../package.json') as {version: string}).version;
 
-/** The code tools for the repo at `cwd`. Closing the connection stops the language servers. */
+/** The code tools for the repo at `cwd`, as the server `code`. Closing it stops the language servers. */
 export function mcpServer(cwd: string): McpServer {
-	const server = new McpServer({name: CODE_SERVER, version: VERSION});
+	const server = new McpServer({name: 'code', version: VERSION});
 	const code = codeTools(cwd);
 	for (const t of code.tools) {
 		server.registerTool(t.name, {description: t.description, inputSchema: t.shape, annotations: {readOnlyHint: true, destructiveHint: false}}, async (args: Record<string, unknown>) => {

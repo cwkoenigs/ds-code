@@ -22,7 +22,6 @@ const EXTENSIONS: Record<string, [Language, string]> = {
 	'.pyi': ['python', 'python'],
 };
 
-export const LANGUAGES: Record<Language, string> = {typescript: 'TypeScript and JavaScript', python: 'Python'};
 
 export const languageOf = (path: string): Language | undefined => EXTENSIONS[extname(path).toLowerCase()]?.[0];
 export const languageIdOf = (path: string): string => EXTENSIONS[extname(path).toLowerCase()]?.[1] ?? 'plaintext';

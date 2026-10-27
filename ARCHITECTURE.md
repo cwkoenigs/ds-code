@@ -24,7 +24,8 @@ flowchart TD
    project; later calls reuse it. `repo_overview` and the diff half of `change_impact` need no server.
 4. **The answer.** Text the model can act on: paths relative to the repo, lines, the line of code.
    Anything that goes wrong comes back as a result that starts with `ERROR:`, never as a crash.
-5. **The end.** When the agent closes the connection, the servers stop.
+5. **The end.** When the agent hangs up (it closes stdin, then sends SIGTERM), the language servers stop
+   and so does ds-code.
 
 ## Rules the code keeps
 
@@ -44,13 +45,13 @@ flowchart TD
 
 | File | Holds |
 |---|---|
-| `src/cli.ts` | The `ds-code` command: `ds-code mcp [DIR]` serves on stdio, for the repo at DIR or here; `-v`, and help |
+| `src/cli.ts` | The `ds-code` command: `ds-code mcp [DIR]` serves on stdio, for the repo at DIR or here, until the agent hangs up; `-v`, and help |
 | `src/mcp.ts` | `mcpServer`: the tools as an MCP server named `code`, each marked read-only; closing it stops the servers |
 | `src/tools.ts` | The eight tools (`find_symbol`, `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview`, `change_impact`) and `CodeIntel`, which asks the servers and shapes the answers |
 | `src/lsp.ts` | `LanguageServer`: a small LSP client over stdio (Content-Length framing, requests, the client's answers to the server), `openFile`, and `diagnosed` for when a file's diagnostics arrive |
 | `src/servers.ts` | Which server reads which file, and how to start each from ds-code's `node_modules`: TypeScript 7's `tsc --lsp`, Pyright's `pyright-langserver`; the project's `.venv` package folders for Pyright (`packagesIn`), never its python |
-| `src/repo.ts` | What needs no server: the repo's files (`git ls-files`), its import graph and entry points for `repo_overview`, the lines `git diff` says changed for `change_impact`, and `within` for paths |
-| `test/code.test.ts` | The tools against the real servers: the two fixture projects, a git repo with changes, this repo (its tests included); the MCP server; the safety rules above; imports and resolution |
+| `src/repo.ts` | What needs no server: the repo's files (`git ls-files`), the files that mention a name (`mentioning`, `git grep`), its import graph and entry points for `repo_overview`, the lines `git diff` says changed for `change_impact`, and `within` and `isFile` for paths |
+| `test/code.test.ts` | The tools against the real servers: the two fixture projects, a file no tsconfig includes, a git repo with changes, this repo (its tests included); the MCP server; the safety rules above; imports and resolution |
 | `test/architecture.test.ts` | That this page names every file, and names no file that is gone |
 | `test/fixtures/code-ts/package.json`, `test/fixtures/code-ts/tsconfig.json`, `test/fixtures/code-ts/src/greet.ts`, `test/fixtures/code-ts/src/main.ts` | A small TypeScript project: `greet`, `shout` which calls it, `run` which calls both |
 | `test/fixtures/code-py/pyproject.toml`, `test/fixtures/code-py/pkg/__init__.py`, `test/fixtures/code-py/pkg/greet.py`, `test/fixtures/code-py/pkg/main.py` | The same project in Python |
@@ -59,7 +60,7 @@ flowchart TD
 
 | To change | Go to |
 |---|---|
-| A tool, or what one answers | `TOOLS` and `CodeIntel` in `src/tools.ts`; its name in `CODE_TOOL_NAMES` there |
+| A tool, or what one answers | `TOOLS` and `CodeIntel` in `src/tools.ts`; a new tool is a new entry in `TOOLS` |
 | A language the tools read | `EXTENSIONS` and `serverSpec` in `src/servers.ts`, with a server that speaks LSP over stdio and installs from npm |
 | What the MCP server says about its tools | `src/mcp.ts` |
 | The command | `src/cli.ts` and its `HELP` text |
@@ -74,10 +75,10 @@ flowchart TD
   the agent closes the connection. The first call loads the project: under a second here, a few
   seconds on a large repo. Pyright answers from its open files alone until it has found the rest, so
   the first call waits for its first diagnostics, which come once it has (30 s at most).
-- **What each server sees.** TypeScript's follows the nearest `tsconfig.json`: a file outside its
-  `include` is read when asked about directly, but its uses of the files inside are not found. So a
-  repo whose tests should count puts them in `tsconfig.json`, as this one does (`tsconfig.build.json`
-  compiles `src` alone). Pyright resolves the repo's own modules always, and installed packages when
+- **What each server sees.** TypeScript's searches only the projects it has loaded: the nearest
+  `tsconfig.json`'s files, and the files opened. So before `references` and `callers`, ds-code opens the
+  repo's other files that mention the name (`git grep`), and uses in tests or scripts outside every
+  `tsconfig.json` are found too. Pyright resolves the repo's own modules always, and installed packages when
   the repo has a `.venv` or `venv` (their `site-packages` and the folders their `.pth` files add, read,
   never run) or `python` is on the PATH.
 
