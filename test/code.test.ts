@@ -1,18 +1,19 @@
-// The code tools against the real language servers rule ships: a small TypeScript project, a small
+// The code tools against the real language servers ds-code ships: a small TypeScript project, a small
 // Python one, a git repo with uncommitted changes, and this repo itself. And the pieces on their own.
 import {execFileSync} from 'node:child_process';
 import {chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterAll, describe, expect, it, vi} from 'vitest';
-import {readOnlyIds} from '../src/agent/backend.js';
-import {toolCall} from '../src/agent/codex.js';
-import {importsIn, resolveImport} from '../src/code/repo.js';
-import {languageOf, packagesIn, pyrightCommand, typescriptCommand} from '../src/code/servers.js';
-import {LanguageServer, toUri} from '../src/code/lsp.js';
-import {CODE_TOOL_NAMES, CodeIntel, codeTools} from '../src/code/tools.js';
-import {tick} from './helpers.js';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import {LanguageServer, toUri} from '../src/lsp.js';
+import {mcpServer} from '../src/mcp.js';
+import {importsIn, resolveImport} from '../src/repo.js';
+import {languageOf, packagesIn, pyrightCommand, typescriptCommand} from '../src/servers.js';
+import {CODE_TOOL_NAMES, CodeIntel, codeTools} from '../src/tools.js';
 
+const tick = (ms = 20) => new Promise(r => setTimeout(r, ms));
 const FIXTURES = join(import.meta.dirname, 'fixtures');
 const ROOT = join(import.meta.dirname, '..');
 
@@ -252,21 +253,31 @@ describe('the code tools never run or read what a repo points them at', () => {
 describe('the code tools on this repo', () => {
 	const run = open(ROOT);
 
-	it('finds openSession and its use in the CLI', async () => {
-		expect((await run('find_symbol', {name: 'openSession'})).text).toContain('  src/agent/backend.ts:');
-		expect((await run('references', {name: 'openSession'})).text).toContain('src/cli.tsx\n');
+	it('finds codeTools, and its uses in the server and in these tests', async () => {
+		expect((await run('find_symbol', {name: 'codeTools'})).text).toContain('  src/tools.ts:');
+		const refs = (await run('references', {name: 'codeTools'})).text;
+		expect(refs).toContain('src/mcp.ts\n');
+		expect(refs).toContain('test/code.test.ts\n'); // tsconfig.json covers the tests, so the server sees them
 	}, 60_000);
 });
 
 describe('the code tools, the pieces', () => {
-	it('never ask, and Codex calls to them come back under `code`', () => {
-		const ids = readOnlyIds([], codeTools(ROOT).tools);
-		for (const name of CODE_TOOL_NAMES) expect(ids.has(`mcp__code__${name}`)).toBe(true);
-		expect(toolCall({type: 'dynamicToolCall', tool: 'references', arguments: {name: 'x'}})).toEqual({name: 'mcp__code__references', input: {name: 'x'}});
-		expect(toolCall({type: 'dynamicToolCall', tool: 'canon_list', arguments: {}})).toEqual({name: 'mcp__ds__canon_list', input: {}});
+	it('serves every tool over MCP as `code`, each marked read-only', async () => {
+		const [server, client] = InMemoryTransport.createLinkedPair();
+		await mcpServer(join(FIXTURES, 'code-ts')).connect(server);
+		const c = new Client({name: 'test', version: '0'});
+		await c.connect(client);
+		expect(c.getServerVersion()?.name).toBe('code');
+		const {tools} = await c.listTools();
+		expect(tools.map(x => x.name).sort()).toEqual([...CODE_TOOL_NAMES].sort());
+		expect(tools.every(x => x.annotations?.readOnlyHint === true && x.annotations?.destructiveHint === false)).toBe(true);
+		const r = await c.callTool({name: 'repo_overview', arguments: {}});
+		expect(r.isError).toBe(false);
+		expect((r.content as {text: string}[])[0]!.text).toContain('src/greet.ts');
+		await c.close(); // stops the language servers
 	});
 
-	it('ships both servers with rule', () => {
+	it('ships both servers with ds-code', () => {
 		expect(existsSync(typescriptCommand().command)).toBe(true);
 		expect(existsSync(pyrightCommand().args[0]!)).toBe(true);
 		expect(languageOf('a.tsx')).toBe('typescript');

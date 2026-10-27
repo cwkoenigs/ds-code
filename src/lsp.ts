@@ -249,7 +249,7 @@ export class LanguageServer {
 			case 'window/showMessageRequest':
 				return {result: null};
 			default:
-				return {error: {code: -32601, message: `rule does not handle ${method}`}};
+				return {error: {code: -32601, message: `ds-code does not handle ${method}`}};
 		}
 	}
 }

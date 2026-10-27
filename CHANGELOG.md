@@ -3,10 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Nothing has been
-released yet, so everything is under Unreleased. Pull requests before #1 here were in ds-next, where
-the CLI started (`cwkoenigs/ds-next#N`).
+released yet, so everything is under Unreleased. This repo was rule-cli until #6; the entries before
+it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI started (`cwkoenigs/ds-next#N`).
 
 ## [Unreleased]
+
+### Changed
+- rule-cli becomes ds-code: the code tools alone, as one MCP server any agent starts with `ds-code mcp`
+  (local-019). The terminal (`rule agent`, `rule demo`, the Rule and Rail looks, the tour, `rule html`),
+  ds-next's ported tools, Codex and the Python helper go; ds-next is the terminal. `src/code/` moves to
+  `src/`, and the package and command are `ds-code`. (#6)
+
+### Fixed
+- `references` found no use in this repo's tests: TypeScript's server reads only what `tsconfig.json`
+  includes, which was `src`. `tsconfig.json` now covers the tests too, so typecheck reads them as well,
+  and `tsconfig.build.json` compiles `src` alone. (#6)
 
 ### Fixed
 - On Windows, found by the first CI run: `scaffold_project` refused every new project, since its path

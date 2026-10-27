@@ -2,9 +2,11 @@
 // entry points, and which lines the uncommitted changes touch.
 import {spawnSync} from 'node:child_process';
 import {existsSync, readdirSync, readFileSync, realpathSync, statSync} from 'node:fs';
-import {basename, join, posix} from 'node:path';
-import {within} from '../ds/py.js';
+import {basename, join, posix, sep} from 'node:path';
 import {type Language, languageOf} from './servers.js';
+
+/** Whether `inner` is `outer` or a path inside it. */
+export const within = (outer: string, inner: string): boolean => inner === outer || inner.startsWith(outer.endsWith(sep) ? outer : outer + sep);
 
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'coverage', '.next', 'out', 'target']);
 

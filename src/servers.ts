@@ -1,6 +1,6 @@
-// The two language servers rule ships, found in its own node_modules: TypeScript 7's native server
+// The two language servers ds-code ships, found in its own node_modules: TypeScript 7's native server
 // for TypeScript and JavaScript, Pyright's for Python. Both are Microsoft's, installed from npm along
-// with rule, and work offline: nothing is downloaded, nothing is reported anywhere.
+// with ds-code, and work offline: nothing is downloaded, nothing is reported anywhere.
 import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {dirname, extname, join, resolve} from 'node:path';

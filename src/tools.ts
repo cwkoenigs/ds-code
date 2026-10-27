@@ -1,20 +1,22 @@
-// The code tools: what a language server knows about the repo, as read-only tools beside ds-next's,
-// served as `code`. TypeScript 7's server and Pyright start on first use for the languages the repo
+// The code tools: what a language server knows about the repo, as read-only tools, served as `code`. TypeScript 7's server and Pyright start on first use for the languages the repo
 // has, stay for the session, and stop with it. Every tool answers in text the model can act on; a
 // server that stops or takes too long is reported, never thrown.
 import {readFileSync, statSync} from 'node:fs';
 import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {z} from 'zod';
-import {within} from '../ds/py.js';
-import {type DsTool, ERROR_PREFIX, type Result} from '../ds/tools.js';
 import {type CallHierarchyItem, type DocumentSymbol, type IncomingCall, kindName, LanguageServer, type Location, type OutgoingCall, type Position, type Range, type SymbolInformation, toPath} from './lsp.js';
-import {changedLines, isRepo, languagesIn, listFiles, overview, realPath, realWithin} from './repo.js';
+import {changedLines, isRepo, languagesIn, listFiles, overview, realPath, realWithin, within} from './repo.js';
 import {type Language, languageOf, serverSpec} from './servers.js';
 
 export const CODE_SERVER = 'code';
 export const CODE_TOOL_NAMES = ['find_symbol', 'references', 'callers', 'callees', 'file_symbols', 'definition', 'repo_overview', 'change_impact'] as const;
 export type CodeToolName = (typeof CODE_TOOL_NAMES)[number];
 export const isCodeTool = (name: string): boolean => (CODE_TOOL_NAMES as readonly string[]).includes(name);
+
+/** Errors say so in their first word as well as in the flag: Cortex Code drops the flag. */
+export const ERROR_PREFIX = 'ERROR: ';
+export type Result = {text: string; error: boolean};
+export type Tool = {name: string; description: string; shape: Record<string, z.ZodType>; run: (args: Record<string, unknown>) => Promise<Result>};
 
 const ok = (text: string): Result => ({text, error: false});
 const fail = (text: string): Result => ({text: ERROR_PREFIX + text, error: true});
@@ -516,11 +518,11 @@ const TOOLS: Record<CodeToolName, Spec> = {
 };
 
 /** The code tools for a repo, and how to stop the servers they started. */
-export function codeTools(root: string): {tools: DsTool[]; close: () => Promise<void>} {
+export function codeTools(root: string): {tools: Tool[]; close: () => Promise<void>} {
 	const code = new CodeIntel(root);
-	const tools = CODE_TOOL_NAMES.map((name): DsTool => {
+	const tools = CODE_TOOL_NAMES.map((name): Tool => {
 		const t = TOOLS[name];
-		return {name, description: t.description, shape: t.shape, readOnly: true, run: args => code.run(() => t.run(code, args ?? {}))};
+		return {name, description: t.description, shape: t.shape, run: args => code.run(() => t.run(code, args ?? {}))};
 	});
 	return {tools, close: () => code.close()};
 }

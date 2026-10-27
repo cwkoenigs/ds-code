@@ -23,7 +23,7 @@ describe('ARCHITECTURE.md', () => {
 
 	it('names no file that is gone', () => {
 		const named = [...page.matchAll(/`((?:src|python|scripts|test)\/[^`\s]+\.[a-z]+)`/g)].map(m => m[1]!);
-		expect(named.length).toBeGreaterThan(40);
+		expect(named.length).toBeGreaterThanOrEqual(MAPPED.flatMap(files).length); // the pattern finds the map
 		expect(named.filter(f => !existsSync(join(ROOT, f))), 'remove or fix these in ARCHITECTURE.md').toEqual([]);
 	});
 });

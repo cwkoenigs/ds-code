@@ -434,3 +434,32 @@ from its git history. Each is dated when it was made.
   the same messages; parity against that branch: 0 unexpected differences, the `files` lines
   compared.
 - **Review date:** when the manifest format next changes.
+
+## local-019: rule-cli becomes ds-code, the code tools alone
+
+- **Status:** Accepted
+- **Date:** 2026-10-27
+- **Context:** The owner has two agent terminals doing one job: ds-next (Python) and rule-cli (Node),
+  kept equal by a parity test, and wants one. Every team machine has Python, uv and Node, so Node's
+  advantage of needing nothing else installed (local-001) is gone, and atlas and the terminal design
+  system (`ds-cli-design`) are Python. ds-next stays the terminal. The code tools (local-010 to
+  local-014) were rule-cli's alone, and are worth keeping.
+- **Options considered:**
+  1. **Port the code tools to Python inside ds-next**: TypeScript's server and Pyright are npm
+     packages, so the port would still run Node, and two copies would need a parity test.
+  2. **A new repo for the code tools, rule-cli archived**: one more repo to know about.
+  3. **rule-cli cut down to the code tools, renamed ds-code**: chosen. One implementation, served over
+     MCP to any agent, keeping the history of the files it holds.
+- **Decision:** The repo holds the eight code tools, `ds-code mcp` and their tests. The terminal, the
+  looks, ds-next's ported tools, Codex and the Python helper go. ds-next attaches `ds-code mcp` as its
+  `code` server. local-001 to local-009, local-013 and local-015 to local-018 were about the terminal;
+  they stay as the record of how this repo got here, and ds-next takes what it adopts from them (Codex
+  through its app-server, local-009, first).
+- **Consequences:** Until ds-next drives Codex, `rule agent` on rule-cli's main is the only terminal
+  for Codex, so main changes only when ds-next can. The repo is renamed on GitHub with this pull
+  request; GitHub redirects the old name, so rule-cli's clones, remotes and links keep working.
+  `tsconfig.json` covers the tests, so `references` sees them; other repos need the same for theirs.
+- **Validation:** `npm run typecheck` (source and tests); `npm test`, 25 tests, including the MCP
+  server's tools and annotations and `references` finding uses in the tests.
+- **Review date:** when ds-next's `code` server is in use at work.
+
