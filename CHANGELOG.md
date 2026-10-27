@@ -20,7 +20,8 @@ it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI starte
   files that mention the name first, in any repo. This repo's `tsconfig.json` also covers its tests,
   so typecheck reads them; `tsconfig.build.json` compiles `src` alone. (#6)
 - `ds-code mcp` kept running, with its language servers, after the agent closed stdin, so every
-  session end waited for the agent to give up on it. It now stops on the end of stdin or SIGTERM. (#6)
+  session end waited for the agent to give up on it. It now stops on the end of stdin or SIGTERM, and
+  waits at most 2 s for each language server to shut down before killing it. (#6)
 
 ### Fixed
 - On Windows, found by the first CI run: `scaffold_project` refused every new project, since its path
