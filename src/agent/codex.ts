@@ -27,6 +27,12 @@ export function codexCommand(): {command: string; args: string[]} {
 	}
 }
 
+/** How long a request waits for Codex's answer. A setting, so the tests can wait less. */
+export const codexLimits = {requestMs: 60_000};
+
+/** A request Codex did not answer in time. */
+export class RequestTimeout extends Error {}
+
 /** One JSON-RPC connection: requests out with promised replies, notifications and server requests in. */
 export class AppServer {
 	private next = 1;
@@ -36,7 +42,7 @@ export class AppServer {
 		private child: ChildProcess,
 		private onNotification: (method: string, params: Obj) => void,
 		private onRequest: (method: string, params: Obj) => Promise<unknown>,
-		private timeoutMs = 60_000,
+		private timeoutMs = codexLimits.requestMs,
 	) {
 		createInterface({input: child.stdout!}).on('line', line => this.receive(line));
 	}
@@ -47,7 +53,7 @@ export class AppServer {
 		const id = this.next++;
 		return new Promise<T>((resolve, reject) => {
 			const timer = setTimeout(() => {
-				if (this.waiting.delete(id)) reject(new Error(`Codex took longer than ${this.timeoutMs / 1000}s to answer ${method}`));
+				if (this.waiting.delete(id)) reject(new RequestTimeout(`Codex took longer than ${this.timeoutMs / 1000}s to answer ${method}`));
 			}, this.timeoutMs);
 			this.waiting.set(id, {
 				resolve: v => {
@@ -346,7 +352,12 @@ export async function openCodexSession(o: SessionOptions): Promise<AgentSession>
 			rpc
 				.request('turn/start', {threadId, input: [{type: 'text', text, text_elements: []}], ...(model ? {model} : {}), ...(o.effort ? {effort: o.effort} : {})})
 				.then(r => (turnId = str((r['turn'] as Obj)?.['id']) || turnId))
-				.catch((err: Error) => emit({kind: 'error', message: err.message}));
+				.catch((err: Error) => {
+					emit({kind: 'error', message: err.message});
+					// A turn Codex never confirmed may still be running: end the process, so nothing of it
+					// (an approval, a result) lands after rule has moved on. The next message resumes the thread.
+					if (err instanceof RequestTimeout) child.kill();
+				});
 		},
 		interrupt,
 		async setModel(m) {

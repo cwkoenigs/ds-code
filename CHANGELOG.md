@@ -9,6 +9,16 @@ the CLI started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Fixed
+- From the second review of #5: an approval was broken to width before control characters became
+  symbols, so 90 ESCs (or keycap emoji, or tabs) still pushed a command's end past the frame; the
+  Cortex hooks question showed `sh` for a hook whose `args` held the rest, and reused a yes when the
+  files changed; a link named like a library (`src/typeshed-leak.ts`) passed as one, a server
+  reporting `/private/var` for `/var` lost the repo's own files, and `callers` named callers in files
+  outside the repo; a Codex turn that timed out kept running; a server whose start failed after it
+  was up kept running; an ended session's late result could hide the next session's question. (#5)
+- A block update replaced a file in its way that the block had not written. Each block's manifest
+  table now lists its `files`, and an update replaces only those (for an older table, its module and
+  the tests that import it), as ds-next does from cwkoenigs/ds-next#6 (local-018). (#5)
 - An allow rule in the person's own Claude settings, or a "don't ask again" saved in Claude Code,
   ran commands in `rule agent` without the dialog. Every Claude tool but the reads now asks
   (local-017). (#5)
@@ -58,6 +68,7 @@ the CLI started (`cwkoenigs/ds-next#N`).
 - `test/codex.test.tsx` assumed no canon on the machine; it now sets `DS_CANON` and `DS_SKILLS` itself. (#5)
 
 ### Added
+- CI: typecheck and the tests on macOS and Windows, Node 22.22 and 26, for every pull request. (#5)
 - README: updating with `npm ci` and why, prompts that reach each code tool and the first real
   answer, why the code tools rather than Serena or a code graph, and what does and doesn't leave the
   machine at work. (#4)

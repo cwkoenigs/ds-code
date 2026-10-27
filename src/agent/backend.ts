@@ -254,11 +254,12 @@ export function sessionParts(cwd: string, connection?: string) {
  *  local, in the folder it starts in and at the repo's top. */
 const HOOK_FILES = ['.cortex/settings.json', '.cortex/settings.local.json', '.claude/settings.json', '.claude/settings.local.json'];
 
-/** The hooks a repo's own settings define: each file, and what each event runs. A file that names
- *  hooks but does not read as JSON is shown whole, since Cortex may read it anyway. */
-export function projectHooks(cwd: string): {file: string; runs: string[]}[] {
+/** The hooks a repo's own settings define: each file, what each event runs, and the file's text. A
+ *  hook is shown as its command only when that is all it has; any other field (args, an env, a
+ *  source) shows it whole, as does a file that names hooks but does not read as JSON. */
+export function projectHooks(cwd: string): {file: string; runs: string[]; text: string}[] {
 	const top = git(cwd, 'rev-parse', '--show-toplevel')?.trim();
-	const out: {file: string; runs: string[]}[] = [];
+	const out: {file: string; runs: string[]; text: string}[] = [];
 	for (const dir of new Set([resolve(cwd), ...(top ? [resolve(top)] : [])])) {
 		for (const rel of HOOK_FILES) {
 			const file = join(dir, rel);
@@ -272,16 +273,19 @@ export function projectHooks(cwd: string): {file: string; runs: string[]}[] {
 			try {
 				hooks = (JSON.parse(text) as {hooks?: unknown} | null)?.hooks;
 			} catch {
-				if (/hooks/i.test(text)) out.push({file, runs: [text.trim()]});
+				if (/hooks/i.test(text)) out.push({file, runs: [text.trim()], text});
 				continue;
 			}
 			if (!hooks || typeof hooks !== 'object' || !Object.keys(hooks).length) continue;
 			const runs = Object.entries(hooks as Record<string, unknown>).flatMap(([event, matchers]) =>
 				(Array.isArray(matchers) ? (matchers as {matcher?: unknown; hooks?: unknown}[]) : []).flatMap(m =>
-					(Array.isArray(m?.hooks) ? (m.hooks as {command?: unknown}[]) : []).map(h => `${event}${m.matcher ? ` (${String(m.matcher)})` : ''}: ${typeof h?.command === 'string' ? h.command : JSON.stringify(h)}`),
+					(Array.isArray(m?.hooks) ? (m.hooks as Record<string, unknown>[]) : []).map(h => {
+						const plain = h && typeof h === 'object' && typeof h['command'] === 'string' && Object.keys(h).every(k => ['type', 'command', 'timeout'].includes(k));
+						return `${event}${m.matcher ? ` (${String(m.matcher)})` : ''}: ${plain ? String(h['command']) : JSON.stringify(h)}`;
+					}),
 				),
 			);
-			out.push({file, runs: runs.length ? runs : [JSON.stringify(hooks)]});
+			out.push({file, runs: runs.length ? runs : [JSON.stringify(hooks)], text});
 		}
 	}
 	return out;
@@ -293,7 +297,7 @@ const hooksAllowed = new Set<string>(); // hooks the person let run, for as long
  *  the person sees each command and decides before a session starts in that repo. */
 async function askAboutHooks(o: SessionOptions): Promise<void> {
 	const found = projectHooks(o.cwd);
-	const key = JSON.stringify(found);
+	const key = JSON.stringify(found); // the files' whole text: any change to them asks again
 	if (!found.length || hooksAllowed.has(key)) return;
 	const command = found.flatMap(f => [`# ${f.file}`, ...f.runs]).join('\n');
 	const answer = await o.ask('Hooks', {command, description: "Cortex Code runs these from this repo's settings as you work, without asking"});

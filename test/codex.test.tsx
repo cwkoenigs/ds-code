@@ -10,7 +10,7 @@ import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {AgentApp} from '../src/agent/AgentApp.js';
 import {type Answer, chooseBackend, LABELS, openSession} from '../src/agent/backend.js';
-import {AppServer, codexCommand, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
+import {AppServer, codexCommand, codexLimits, dynamicTool, shellCommand, toolCall, toolOutput} from '../src/agent/codex.js';
 import type {AgentEvent} from '../src/agent/events.js';
 import {RAIL} from '../src/agent/looks.js';
 import {askContent} from '../src/agent/present.js';
@@ -21,7 +21,7 @@ import {fakeModel, modelConfig} from './fixtures/fake-model.js';
 import {ENTER, ready, tick, until} from './helpers.js';
 
 const FAKE = join(import.meta.dirname, 'fixtures', 'fake-codex.mjs');
-const KEYS = ['CODEX_CLI_PATH', 'FAKE_CODEX_LOG', 'CODEX_HOME', 'DS_CANON', 'DS_SKILLS'] as const;
+const KEYS = ['CODEX_CLI_PATH', 'FAKE_CODEX_LOG', 'CODEX_HOME', 'DS_CANON', 'DS_SKILLS', 'FAKE_CODEX_SILENT_TURN'] as const;
 const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]));
 let logFile = '';
 
@@ -153,6 +153,22 @@ describe('Codex, the pieces', () => {
 			await expect(rpc.request('initialize', {})).rejects.toThrow('Codex took longer than 0.2s to answer initialize');
 		} finally {
 			silent.kill();
+		}
+	});
+
+	it('ends a session whose turn Codex never confirms, so nothing of that turn lands later', async () => {
+		process.env['FAKE_CODEX_SILENT_TURN'] = '1'; // the stand-in plays the turn but never answers turn/start
+		codexLimits.requestMs = 300;
+		try {
+			const {s, events, closed} = await session('yes');
+			s.send('go');
+			await until(() => String(closed()), v => v === 'true');
+			expect(events.find(e => e.kind === 'error')).toMatchObject({message: 'Codex took longer than 0.3s to answer turn/start'});
+			const seen = events.length;
+			await tick(500);
+			expect(events.length).toBe(seen); // the process is gone: no approval or result of that turn arrives
+		} finally {
+			codexLimits.requestMs = 60_000;
 		}
 	});
 

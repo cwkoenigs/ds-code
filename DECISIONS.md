@@ -319,9 +319,10 @@ from its git history. Each is dated when it was made.
   3. **Treat a file reached through a link out of the repo as outside it, and show nothing from
      outside but libraries**: chosen. One rule in `external()`, which every answer already uses.
 - **Decision:** `repo.realWithin` follows links on both sides. `listFiles` leaves out links that
-  lead out; `abs` refuses them by name; `external` calls them outside the repo; `raw` reads no line
+  lead out; `abs` refuses them by name; `external` judges a location by its real path against the
+  repo's real root, and a library by a real library folder, never by a name; `raw` reads no line
   from outside but `node_modules`, `site-packages` and the standard library; `locate` and
-  `references` drop locations outside.
+  `references` drop locations outside, and `callers` and `callees` count them without naming them.
 - **Consequences:** References from files outside the repo, which a `tsconfig.json` could include,
   are no longer listed. Links inside the repo, and libraries wherever they are, are unchanged.
 - **Validation:** `test/code.test.ts` links a file outside the repo into it: `definition` refuses it,
@@ -376,8 +377,9 @@ from its git history. Each is dated when it was made.
      gotcha-approvals: commands always ask.
 - **Decision:** before a Cortex session, `projectHooks` reads `.cortex/settings{,.local}.json` and
   `.claude/settings{,.local}.json` in the folder and at the repo's top. When any define hooks, the
-  approval dialog shows each event and command, whole. A no starts nothing and says to remove them
-  or to use `--agent claude`; a yes lasts while rule runs, until the hooks change.
+  approval dialog shows each event and command, whole, and any hook with more than a command
+  (`args`, an env) as its JSON. A no starts nothing and says to remove them or to use
+  `--agent claude`; a yes lasts while rule runs, until a settings file's text changes.
 - **Consequences:** Cortex in a repo with hooks costs one question per run of rule. A settings file
   that names hooks but is not JSON is shown whole. Hooks Cortex reads from anywhere else are not
   seen.
@@ -411,3 +413,22 @@ from its git history. Each is dated when it was made.
 - **Validation:** `test/agent.test.tsx`: with a user allow rule for `Bash`, the command asks and,
   declined, does not run (it ran before); a `Read` in the project still does not ask.
 - **Review date:** each `@anthropic-ai/claude-agent-sdk` upgrade.
+
+## local-018: A block's manifest table lists the files it wrote
+
+- **Status:** Accepted
+- **Date:** 2026-10-26
+- **Context:** Codex's review (#8): `addBlock` and `code.add` checked for files in the way only on
+  a first add, so an update that brought a new file replaced whatever was there. ds-next has the
+  same code. Nothing recorded which files a block wrote, and the manifest format is shared.
+- **Options considered:** compare contents (an older version's files are not in the canon); refuse
+  every existing file on update (every update would fail); record the files, in both repos: chosen.
+- **Decision:** as ds-next's local-002 (cwkoenigs/ds-next#6): each `[blocks.<id>]` table gains
+  `files = [...]`; an update replaces only those, or for an older table the recorded module and the
+  tests that import it (`scaffold.ownedFiles`).
+- **Consequences:** the parity check needs ds-next with that change; a manifest from before keeps
+  working, and its next update writes the list.
+- **Validation:** `test/ds.test.ts` and ds-next's `tests/test_blocks.py` check the same cases with
+  the same messages; parity against that branch: 0 unexpected differences, the `files` lines
+  compared.
+- **Review date:** when the manifest format next changes.

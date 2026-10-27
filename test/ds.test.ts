@@ -171,11 +171,18 @@ describe('scaffold.write and reconcile', () => {
 describe('the Python that cuts canon code', () => {
 	const uv = spawnSync('uv', ['--version']).status === 0;
 
-	it.skipIf(!uv)('is one uv already has: code_get only reads, so it never downloads a Python or goes online', () => {
-		const viaUv = code.pythonCandidates().find(c => c.includes('run') && c.includes('--python'))!;
-		expect(viaUv).toEqual(expect.arrayContaining(['--no-python-downloads', '--offline']));
+	it('asks uv for one it already has: code_get only reads, so it never downloads a Python or goes online', () => {
+		const viaUv = code.pythonCandidates('/opt/uv/bin/uv').find(c => c[0] === '/opt/uv/bin/uv')!;
+		expect(viaUv).toEqual(['/opt/uv/bin/uv', 'run', '--no-project', '--quiet', '--no-python-downloads', '--offline', '--python', '>=3.10', 'python']);
+	});
+
+	// An older uv, or one with no Python 3.10+ of its own, fails here and code_get falls back to $DS_PYTHON or
+	// python3; this checks a uv that has both.
+	const usable = uv && /--no-python-downloads/.test(spawnSync('uv', ['run', '--help'], {encoding: 'utf8'}).stdout ?? '') && spawnSync('uv', ['python', 'find', '--no-python-downloads', '>=3.10']).status === 0;
+	it.skipIf(!usable)('still finds a Python with the installed uv, offline', () => {
+		const viaUv = code.pythonCandidates().find(c => c.includes('--no-python-downloads'))!;
 		const r = spawnSync(viaUv[0]!, [...viaUv.slice(1), '-I', '-c', 'import sys; print(sys.version_info >= (3, 10))'], {encoding: 'utf8'});
-		expect(r.stdout.trim()).toBe('True'); // and still finds one here
+		expect(r.status === 0 ? r.stdout.trim() : 'no Python 3.10+ that uv already has').toBe('True');
 	});
 });
 
@@ -195,6 +202,28 @@ describe('canon code in a repo', () => {
 			expect(readFileSync(outside, 'utf8')).toBe(before);
 			expect(existsSync(join(dest, 'tests', 'test_demo_mod.py'))).toBe(false); // refused before anything was written
 		}
+	});
+
+	it('updates only the files the block wrote: never one in its way that is someone else\'s', () => {
+		const {tmp, skills} = setup();
+		const old = makeCanon(join(tmp, 'c1'));
+		const dest = join(tmp, 'demo-app');
+		scaffold.write(answers(), dest, old, skills, {withGit: false});
+		scaffold.addBlock(dest, 'block-demo', old, 'Ann', '2026-10-25');
+		const manifest = join(dest, '.ds', 'manifest.toml');
+		const listed = 'files = ["src/demo_app/demo_mod.py", "tests/test_demo_mod.py"]';
+		expect(readFileSync(manifest, 'utf8')).toContain(listed);
+		// as if v1 had written only its module, and the tests file were the person's own
+		writeFileSync(manifest, readFileSync(manifest, 'utf8').replace(listed, 'files = ["src/demo_app/demo_mod.py"]'));
+		writeFileSync(join(dest, 'tests', 'test_demo_mod.py'), 'mine = True\n');
+		const newer = makeCanon(join(tmp, 'c2'), {'block-demo': 2});
+		expect(() => scaffold.addBlock(dest, 'block-demo', newer)).toThrow('not updated: tests/test_demo_mod.py already exist and were not written by block-demo');
+		expect(readFileSync(join(dest, 'tests', 'test_demo_mod.py'), 'utf8')).toBe('mine = True\n');
+		// a table from before files were listed trusts its module and the tests that import it
+		writeFileSync(manifest, readFileSync(manifest, 'utf8').split('\n').filter(l => !l.startsWith('files = ')).join('\n'));
+		expect(() => scaffold.addBlock(dest, 'block-demo', newer)).toThrow('not updated: tests/test_demo_mod.py');
+		writeFileSync(join(dest, 'tests', 'test_demo_mod.py'), 'from demo_app.demo_mod import shout\n');
+		expect(scaffold.addBlock(dest, 'block-demo', newer).note).toBe('updated');
 	});
 
 	it('adds a block with its requirements, once', () => {

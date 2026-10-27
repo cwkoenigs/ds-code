@@ -1,0 +1,26 @@
+# The required checks (AGENTS.md) on the team's two systems, at the oldest Node rule supports and
+# the one the team runs. Tests that need a ds-next checkout, a canon or uv skip, and say so.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        node: ['22.22', '26']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

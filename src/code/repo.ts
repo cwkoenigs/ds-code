@@ -34,6 +34,9 @@ const real = (p: string): string | undefined => {
 	}
 };
 
+/** p as the filesystem has it, links followed and letters cased as on disk; p itself when it does not exist. */
+export const realPath = (p: string): string => real(p) ?? p;
+
 /** Whether p, followed through every symbolic link, is still inside root: a link in the repo can
  *  point anywhere, and a tool that never asks must not read through it. */
 export function realWithin(root: string, p: string): boolean {

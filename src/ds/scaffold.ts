@@ -315,6 +315,23 @@ export function installHook(repoIn: string): string | undefined {
 
 // ── writing ──────────────────────────────────────────────────────────────────
 
+/** The files a block wrote into this repo before, which an update may replace: what its manifest
+ *  table lists, or, for a table written before tables listed them, its module and the tests that
+ *  import it, as a block's own tests do. Anything else in the way is someone else's. */
+export function ownedFiles(prior: Record<string, unknown>, targets: Record<string, string>, pkg: string, module: string): Set<string> {
+	if (Array.isArray(prior['files'])) return new Set(prior['files'].map(String));
+	const imports = new RegExp(`^\\s*(?:from\\s+${escapeRe(pkg)}\\.${escapeRe(module)}\\s+import\\b|import\\s+${escapeRe(pkg)}\\.${escapeRe(module)}\\b)`, 'm');
+	const owned = new Set([String(prior['module'] || `src/${pkg}/${module}.py`)]);
+	for (const [rel, t] of Object.entries(targets)) {
+		try {
+			if (isFile(t) && imports.test(readText(t))) owned.add(rel);
+		} catch {
+			// unreadable: not known to be the block's
+		}
+	}
+	return owned;
+}
+
 /** The path for rel under dest, refusing anything that would land elsewhere or pass through a link. */
 export function inside(dest: string, rel: string): string {
 	const parts = rel.split(/[\\/]/).filter(Boolean);
@@ -444,17 +461,17 @@ export function addBlock(repoIn: string, bid: string, canon = new Canon(), by?: 
 	if (!b) throw new InputError(`block ${pyRepr(bid)}: the canon has ${[...canon.blocks.keys()].join(', ') || 'none'}`);
 	if (!b.accepted) throw new InputError(`block ${bid} is ${b.status}, not accepted: its owner approves it in the canon`);
 	const {manifestPath, manifestText, manifest, pkg} = repoPackage(repo, 'the block');
-	const have = manifest.blocks?.[bid]?.version;
+	const prior = manifest.blocks?.[bid];
+	const have = prior?.version;
 	if (have === b.version) return {block: bid, version: b.version, files: [], requires: [], manual: [], note: 'already at this version'};
 	const files = canon.blockFiles(bid, pkg);
 	const targets = Object.fromEntries(Object.keys(files).map(rel => [rel, inside(repo, rel)]));
-	if (have === undefined) {
-		const clash = Object.keys(targets).filter(rel => existsSync(targets[rel]!));
-		if (clash.length) throw new ExistsError(`not added: ${clash.join(', ')} already exist and were not written by ${bid}`);
-	}
+	const owned = prior && typeof prior === 'object' ? ownedFiles(prior, targets, pkg, b.module) : new Set<string>();
+	const clash = Object.keys(targets).filter(rel => existsSync(targets[rel]!) && !owned.has(rel));
+	if (clash.length) throw new ExistsError(`not ${have !== undefined ? 'updated' : 'added'}: ${clash.join(', ')} already exist and were not written by ${bid}`);
 	writeFiles(targets, files);
 	const {added, manual} = addRequirements(repo, [['dependencies', b.requires], ['dev', b.testRequires]]);
-	const table = `[blocks.${bid}]\nversion = ${b.version}\nby = ${jsonStr(by ?? gitUser())}\non = "${today}"\nmodule = ${jsonStr(`src/${pkg}/${b.module}.py`)}\n`;
+	const table = `[blocks.${bid}]\nversion = ${b.version}\nby = ${jsonStr(by ?? gitUser())}\non = "${today}"\nmodule = ${jsonStr(`src/${pkg}/${b.module}.py`)}\nfiles = [${Object.keys(files).sort().map(jsonStr).join(', ')}]\n`;
 	writeFileSync(manifestPath, setBlockTable(manifestText, bid, table));
 	return {block: bid, version: b.version, files: Object.keys(files).sort(), requires: added, manual, note: have !== undefined ? 'updated' : 'added'};
 }

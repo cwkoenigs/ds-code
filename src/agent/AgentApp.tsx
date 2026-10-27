@@ -221,11 +221,11 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 		if (session.current) return session.current;
 		const mine = generation.current;
 		try {
-			session.current = await open({
+			const opened = await open({
 				backend,
 				cwd,
 				ask: (name, input) => askPerson(mine, name, input),
-				onEvent,
+				onEvent: e => mine === generation.current && onEvent(e), // an ended session's late events are its own
 				model: model || undefined,
 				connection,
 				effort,
@@ -239,7 +239,12 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 					}
 				},
 			});
-			return session.current;
+			if (mine !== generation.current) {
+				opened.close(); // ended while it was starting (left, cleared): it never becomes the session
+				return null;
+			}
+			session.current = opened;
+			return opened;
 		} catch (err) {
 			block(look.failure(label, (err as Error).message, w));
 			return null;
@@ -248,9 +253,8 @@ export function AgentApp({backend, open, cwd, width, model: initialModel, connec
 
 	const closeSession = () => {
 		const ending = session.current;
-		if (!ending) return;
-		endSession();
-		ending.close();
+		endSession(); // a session still starting is ended too: it is closed the moment it arrives
+		ending?.close();
 	};
 
 	const leave = () => {

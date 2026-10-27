@@ -1,14 +1,15 @@
 // The code tools against the real language servers rule ships: a small TypeScript project, a small
 // Python one, a git repo with uncommitted changes, and this repo itself. And the pieces on their own.
 import {execFileSync} from 'node:child_process';
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync} from 'node:fs';
+import {chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {afterAll, describe, expect, it} from 'vitest';
+import {afterAll, describe, expect, it, vi} from 'vitest';
 import {readOnlyIds} from '../src/agent/backend.js';
 import {toolCall} from '../src/agent/codex.js';
 import {importsIn, resolveImport} from '../src/code/repo.js';
 import {languageOf, packagesIn, pyrightCommand, typescriptCommand} from '../src/code/servers.js';
+import {LanguageServer, toUri} from '../src/code/lsp.js';
 import {CODE_TOOL_NAMES, CodeIntel, codeTools} from '../src/code/tools.js';
 import {tick} from './helpers.js';
 
@@ -192,6 +193,59 @@ describe('the code tools never run or read what a repo points them at', () => {
 		expect(asked.text).toBe('ERROR: src/leak.ts is a link to a file outside the repo');
 		expect((await run('find_symbol', {name: 'TOKEN'})).text).not.toContain('leak.ts');
 		expect((await run('repo_overview')).text).not.toContain('leak.ts');
+	});
+
+	it.skipIf(process.platform === 'win32')("calls nothing a library because of its name: a link named like typeshed is still outside", async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-libname-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		const secret = join(mkdtempSync(join(tmpdir(), 'code-secret-')), 'private.ts');
+		writeFileSync(secret, "export const SECRET_NAME = 'one';\n");
+		symlinkSync(secret, join(dir, 'src', 'typeshed-leak.ts'));
+		const found = (await open(dir)('find_symbol', {name: 'SECRET_NAME'})).text;
+		expect(found).not.toContain('typeshed-leak');
+		expect(found).not.toContain("'one'");
+	});
+
+	it.skipIf(process.platform === 'win32')('knows the repo by its real path: a server may report /private/var for /var, or a link to the repo', () => {
+		const real = mkdtempSync(join(tmpdir(), 'code-real-'));
+		cpSync(join(FIXTURES, 'code-ts'), real, {recursive: true});
+		const link = join(mkdtempSync(join(tmpdir(), 'code-via-')), 'repo');
+		symlinkSync(real, link);
+		const code = new CodeIntel(link);
+		const reported = toUri(join(realpathSync(real), 'src', 'greet.ts'));
+		expect([code.external(reported), code.rel(reported)]).toEqual([undefined, 'src/greet.ts']);
+	});
+
+	it('names no caller in a file outside the repo that a tsconfig brings in, and says how many there are', async () => {
+		const parent = mkdtempSync(join(tmpdir(), 'code-tsconfig-'));
+		const dir = join(parent, 'repo');
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		mkdirSync(join(parent, 'private', 'src'), {recursive: true});
+		writeFileSync(join(parent, 'private', 'src', 'secret.ts'), "import {greet} from '../../repo/src/greet.js';\n\nexport function secretCaller(): string {\n\treturn greet('x');\n}\n");
+		writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({...JSON.parse(readFileSync(join(dir, 'tsconfig.json'), 'utf8')), include: ['src', '../private/src']}));
+		const run = open(dir);
+		const callers = (await run('callers', {name: 'greet', path: 'src/greet.ts', depth: 1})).text;
+		expect(callers).not.toContain('secretCaller');
+		expect(callers).not.toContain('private');
+		expect(callers).toContain('and 1 caller in files outside the repo, not shown');
+		expect(callers).toContain('shout  src/greet.ts:5');
+	});
+
+	it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('stops a server whose start fails after it is up: an unreadable first file', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'code-eacces-'));
+		cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+		writeFileSync(join(dir, 'src', 'a-first.ts'), 'export const A = 1;\n'); // the file the server is shown first
+		chmodSync(join(dir, 'src', 'a-first.ts'), 0o000);
+		const stop = vi.spyOn(LanguageServer.prototype, 'stop');
+		const code = new CodeIntel(dir);
+		try {
+			await expect(code.server('typescript')).rejects.toThrow(/EACCES/);
+			expect(stop).toHaveBeenCalledTimes(1);
+		} finally {
+			stop.mockRestore();
+			chmodSync(join(dir, 'src', 'a-first.ts'), 0o644);
+			await code.close();
+		}
 	});
 });
 

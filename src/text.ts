@@ -119,23 +119,28 @@ export function prevBoundary(text: string, at: number): number {
 }
 
 /** Every line of `text`, broken every `w` cells and never cut: for a request a person approves, which
- *  must reach them whole (canon gotcha-approvals). */
+ *  must reach them whole (canon gotcha-approvals). Measured as it will be drawn: control characters
+ *  as the symbols `visible` makes them (an ESC measures 0, its ␛ 1), a tab as spaces, and an emoji
+ *  with its modifiers as one character. Measured raw, 90 ESCs pushed the rest past the frame's edge. */
 export function breakLines(text: string, w: number): string[] {
 	const cells = Math.max(1, w);
-	return text.split('\n').flatMap(line => {
-		const out = [''];
-		let used = 0;
-		for (const ch of line) {
-			const cw = stringWidth(ch);
-			if (used + cw > cells && used > 0) {
-				out.push('');
-				used = 0;
+	return visible(text)
+		.replace(/\t/g, '    ')
+		.split('\n')
+		.flatMap(line => {
+			const out = [''];
+			let used = 0;
+			for (const {segment} of graphemes.segment(line)) {
+				const cw = stringWidth(segment);
+				if (used + cw > cells && used > 0) {
+					out.push('');
+					used = 0;
+				}
+				out[out.length - 1] += segment;
+				used += cw;
 			}
-			out[out.length - 1] += ch;
-			used += cw;
-		}
-		return out;
-	});
+			return out;
+		});
 }
 
 /** Word-wrap a styled row to `w` cells, keeping each word's style. A span with a background (an

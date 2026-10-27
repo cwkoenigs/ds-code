@@ -154,13 +154,12 @@ Two differences are expected:
 - `canon_read` of an unknown id: ds-next's message carries extra quotes, a side effect of Python's `KeyError`.
 - A manifest that isn't valid TOML: the error is worded by a different parser.
 
-Any other difference fails the check (it exits 1).
+Any other difference fails the check (it exits 1). It needs ds-next with cwkoenigs/ds-next#6, where a block's manifest table lists its files and no metadata is written through a link, as here.
 
 **Where the port departs from ds-next, on purpose:**
 - **`adopt_repo` is offered to the agent.** ds-next defines it and its prompt tells the agent to use it, but it's missing from the tools ds-next registers.
 - **List arguments are read as lists.** A list passed for `tags` or `ids` reads as the comma-separated string; ds-next would read the list's Python text.
 - **A tool that fails says why.** A canon that no longer matches its index returns an `ERROR:` result instead of an exception.
-- **No metadata is written through a link.** `block_add` and `code_add` refuse a `pyproject.toml` or `.ds/manifest.toml` that is a symbolic link, before writing anything; ds-next would write through it.
 
 ## Two looks: Rule and Rail
 

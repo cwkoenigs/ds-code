@@ -57,7 +57,8 @@ createInterface({input: process.stdin}).on('line', line => {
 			out({id: m.id, result: {thread: {id: threadId, model: 'gpt-test'}, model: 'gpt-test', modelProvider: 'openai'}});
 			return note('thread/started', {thread: {id: threadId}});
 		case 'turn/start':
-			out({id: m.id, result: {turn: {id: `turn-${turn + 1}`, status: 'inProgress', items: []}}});
+			// FAKE_CODEX_SILENT_TURN: play the turn but never answer the request, as a Codex that hangs might
+			if (!process.env.FAKE_CODEX_SILENT_TURN) out({id: m.id, result: {turn: {id: `turn-${turn + 1}`, status: 'inProgress', items: []}}});
 			return void play(m.params.input.map(i => i.text).join(' '));
 		case 'turn/interrupt':
 			if (live) live.stopped = true;
