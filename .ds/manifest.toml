@@ -1,6 +1,6 @@
 [repo]
-name = "rule-cli"
-tags = ["cli", "cortex", "mcp", "node", "package", "terminal", "typescript"]
+name = "ds-code"
+tags = ["cli", "mcp", "node", "package", "typescript"]
 created = "2026-10-26"
 adopted = "2026-10-26"
 test_cmd = "npm test"

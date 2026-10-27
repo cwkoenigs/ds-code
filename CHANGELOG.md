@@ -3,10 +3,25 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Nothing has been
-released yet, so everything is under Unreleased. Pull requests before #1 here were in ds-next, where
-the CLI started (`cwkoenigs/ds-next#N`).
+released yet, so everything is under Unreleased. This repo was rule-cli until #6; the entries before
+it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI started (`cwkoenigs/ds-next#N`).
 
 ## [Unreleased]
+
+### Changed
+- rule-cli becomes ds-code: the code tools alone, as one MCP server any agent starts with `ds-code mcp`
+  (local-019). The terminal (`rule agent`, `rule demo`, the Rule and Rail looks, the tour, `rule html`),
+  ds-next's ported tools, Codex and the Python helper go; ds-next is the terminal. `src/code/` moves to
+  `src/`, and the package and command are `ds-code`. (#6)
+
+### Fixed
+- `references` and `callers` missed uses in TypeScript files no `tsconfig.json` includes, such as a
+  repo's tests: TypeScript's server searches only the projects it has loaded. They now open the repo's
+  files that mention the name first, in any repo. This repo's `tsconfig.json` also covers its tests,
+  so typecheck reads them; `tsconfig.build.json` compiles `src` alone. (#6)
+- `ds-code mcp` kept running, with its language servers, after the agent closed stdin, so every
+  session end waited for the agent to give up on it. It now stops on the end of stdin or SIGTERM, and
+  waits at most 2 s for each language server to shut down before killing it. (#6)
 
 ### Fixed
 - On Windows, found by the first CI run: `scaffold_project` refused every new project, since its path

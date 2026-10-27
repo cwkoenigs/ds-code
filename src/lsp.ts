@@ -161,9 +161,11 @@ export class LanguageServer {
 	}
 
 	/** Ask the server to shut down, then end the process. */
+	/** Ask the server to shut down, then to exit; kill it if either takes more than 2 s. A busy server can
+	 *  take a minute to answer `shutdown`, and the agent waiting on ds-code to end should not. */
 	async stop(): Promise<void> {
 		if (this.stopped) return;
-		await this.request('shutdown').catch(() => undefined);
+		await Promise.race([this.request('shutdown').catch(() => undefined), new Promise(r => setTimeout(r, 2000))]);
 		this.notify('exit');
 		await new Promise<void>(r => {
 			const t = setTimeout(() => {
@@ -249,7 +251,7 @@ export class LanguageServer {
 			case 'window/showMessageRequest':
 				return {result: null};
 			default:
-				return {error: {code: -32601, message: `rule does not handle ${method}`}};
+				return {error: {code: -32601, message: `ds-code does not handle ${method}`}};
 		}
 	}
 }

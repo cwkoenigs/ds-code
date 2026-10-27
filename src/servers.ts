@@ -1,6 +1,6 @@
-// The two language servers rule ships, found in its own node_modules: TypeScript 7's native server
+// The two language servers ds-code ships, found in its own node_modules: TypeScript 7's native server
 // for TypeScript and JavaScript, Pyright's for Python. Both are Microsoft's, installed from npm along
-// with rule, and work offline: nothing is downloaded, nothing is reported anywhere.
+// with ds-code, and work offline: nothing is downloaded, nothing is reported anywhere.
 import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {dirname, extname, join, resolve} from 'node:path';
@@ -22,7 +22,6 @@ const EXTENSIONS: Record<string, [Language, string]> = {
 	'.pyi': ['python', 'python'],
 };
 
-export const LANGUAGES: Record<Language, string> = {typescript: 'TypeScript and JavaScript', python: 'Python'};
 
 export const languageOf = (path: string): Language | undefined => EXTENSIONS[extname(path).toLowerCase()]?.[0];
 export const languageIdOf = (path: string): string => EXTENSIONS[extname(path).toLowerCase()]?.[1] ?? 'plaintext';

@@ -1,20 +1,17 @@
-// The code tools: what a language server knows about the repo, as read-only tools beside ds-next's,
-// served as `code`. TypeScript 7's server and Pyright start on first use for the languages the repo
+// The code tools: what a language server knows about the repo, as read-only tools, served as `code`. TypeScript 7's server and Pyright start on first use for the languages the repo
 // has, stay for the session, and stop with it. Every tool answers in text the model can act on; a
 // server that stops or takes too long is reported, never thrown.
-import {readFileSync, statSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {z} from 'zod';
-import {within} from '../ds/py.js';
-import {type DsTool, ERROR_PREFIX, type Result} from '../ds/tools.js';
 import {type CallHierarchyItem, type DocumentSymbol, type IncomingCall, kindName, LanguageServer, type Location, type OutgoingCall, type Position, type Range, type SymbolInformation, toPath} from './lsp.js';
-import {changedLines, isRepo, languagesIn, listFiles, overview, realPath, realWithin} from './repo.js';
+import {changedLines, isFile, isRepo, languagesIn, listFiles, mentioning, overview, realPath, realWithin, within} from './repo.js';
 import {type Language, languageOf, serverSpec} from './servers.js';
 
-export const CODE_SERVER = 'code';
-export const CODE_TOOL_NAMES = ['find_symbol', 'references', 'callers', 'callees', 'file_symbols', 'definition', 'repo_overview', 'change_impact'] as const;
-export type CodeToolName = (typeof CODE_TOOL_NAMES)[number];
-export const isCodeTool = (name: string): boolean => (CODE_TOOL_NAMES as readonly string[]).includes(name);
+/** Errors say so in their first word as well as in the flag: Cortex Code drops the flag. */
+const ERROR_PREFIX = 'ERROR: ';
+type Result = {text: string; error: boolean};
+export type Tool = {name: string; description: string; shape: Record<string, z.ZodType>; run: (args: Record<string, unknown>) => Promise<Result>};
 
 const ok = (text: string): Result => ({text, error: false});
 const fail = (text: string): Result => ({text: ERROR_PREFIX + text, error: true});
@@ -24,20 +21,12 @@ class InputError extends Error {}
 
 /** A symbol as the tools name it: its file relative to the repo with / separators, 1-based lines, and
  *  its containers in `qualified` (Class.method). */
-export type CodeSymbol = {name: string; qualified: string; kind: string; path: string; line: number; endLine: number; uri: string; position: Position};
+type CodeSymbol = {name: string; qualified: string; kind: string; path: string; line: number; endLine: number; uri: string; position: Position};
 
 const WITH_MEMBERS = new Set([2, 3, 5, 10, 11, 23]); // module, namespace, class, enum, interface, struct: their children are symbols too
 const MAX_LINES = 150;
 const MAX_CALLERS = 80;
 const SETTLE_MS = 30_000; // the longest a starting server is waited for before it answers as it can
-
-const isFile = (p: string): boolean => {
-	try {
-		return statSync(p).isFile();
-	} catch {
-		return false;
-	}
-};
 
 /** At most MAX_LINES lines, saying how many were left out. */
 const cut = (lines: string[]): string[] => (lines.length <= MAX_LINES ? lines : [...lines.slice(0, MAX_LINES), `… and ${lines.length - MAX_LINES} more lines`]);
@@ -237,8 +226,20 @@ export class CodeIntel {
 		return s;
 	}
 
+	/** TypeScript's server searches only the projects it has loaded, a tsconfig's files and the files
+	 *  opened. Opening the repo's other files that mention the name loads them too, so uses in tests or
+	 *  scripts outside every tsconfig are found. Pyright reads every file under the root already. */
+	private openMentions(s: LanguageServer, sym: CodeSymbol): void {
+		if (languageOf(sym.path) !== 'typescript') return;
+		for (const f of mentioning(this.root, sym.name)) {
+			const abs = join(this.root, f);
+			if (languageOf(f) === 'typescript' && !f.endsWith('.d.ts') && isFile(abs) && realWithin(this.root, abs)) s.openFile(abs);
+		}
+	}
+
 	async references(sym: CodeSymbol): Promise<Location[]> {
 		const s = await this.serverFor(sym);
+		this.openMentions(s, sym);
 		const refs = (await s.request<Location[] | null>('textDocument/references', {textDocument: {uri: sym.uri}, position: sym.position, context: {includeDeclaration: false}})) ?? [];
 		return refs.filter(l => this.shown(l.uri));
 	}
@@ -268,6 +269,7 @@ export class CodeIntel {
 	/** Who calls a symbol, and who calls them, to `depth`: each line calls the one it is indented under. */
 	async callers(sym: CodeSymbol, depth: number): Promise<string[]> {
 		const [s, item] = await this.hierarchy(sym);
+		this.openMentions(s, sym);
 		const lines: string[] = [];
 		const seen = new Set<string>();
 		let hidden = 0; // callers in files outside the repo: counted, never named
@@ -426,7 +428,7 @@ const at = (s: CodeSymbol): string => `${s.path}:${s.line}`;
 
 type Spec = {description: string; shape: Record<string, z.ZodType>; run: (code: CodeIntel, args: Record<string, unknown>) => Promise<string>};
 
-const TOOLS: Record<CodeToolName, Spec> = {
+const TOOLS: Record<string, Spec> = {
 	find_symbol: {
 		description: 'Where a function, class, method, variable or type is defined, by name, anywhere in the repo (TypeScript, JavaScript and Python). Pass path to look in one file; Class.method names a member.',
 		shape: {name: z.string().describe('the name, or Class.method'), path: z.string().optional().describe('look in this file only')},
@@ -455,7 +457,7 @@ const TOOLS: Record<CodeToolName, Spec> = {
 			const depth = Math.min(4, Math.max(1, int(a, 'depth', 2) || 2));
 			const sym = await code.one(str(a, 'name'), str(a, 'path') || undefined);
 			const tree = await code.callers(sym, depth);
-			if (!tree.length) return `Nothing calls ${sym.qualified} (${at(sym)}) that the language server sees. It may be passed as a value, exported for others, or used from files outside the project's tsconfig.`;
+			if (!tree.length) return `Nothing calls ${sym.qualified} (${at(sym)}) that the language server sees. It may be passed as a value, or exported for others.`;
 			return [`Callers of ${sym.qualified} (${at(sym)}), ${plural(depth, 'level')}; each line calls the one it is indented under, at the lines in parentheses:`, ...tree, ...(tree.length >= MAX_CALLERS ? ['… stopped at 80 callers'] : [])].join('\n');
 		},
 	},
@@ -516,11 +518,8 @@ const TOOLS: Record<CodeToolName, Spec> = {
 };
 
 /** The code tools for a repo, and how to stop the servers they started. */
-export function codeTools(root: string): {tools: DsTool[]; close: () => Promise<void>} {
+export function codeTools(root: string): {tools: Tool[]; close: () => Promise<void>} {
 	const code = new CodeIntel(root);
-	const tools = CODE_TOOL_NAMES.map((name): DsTool => {
-		const t = TOOLS[name];
-		return {name, description: t.description, shape: t.shape, readOnly: true, run: args => code.run(() => t.run(code, args ?? {}))};
-	});
+	const tools = Object.entries(TOOLS).map(([name, t]): Tool => ({name, description: t.description, shape: t.shape, run: args => code.run(() => t.run(code, args ?? {}))}));
 	return {tools, close: () => code.close()};
 }

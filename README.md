@@ -1,98 +1,49 @@
-# rule-cli
+# ds-code
 
-The reference CLI for **Rule**, the ds-next terminal design system in the Modernist direction, built in TypeScript with [Ink](https://github.com/vadimdemedes/ink). The whole spec is in the source, `rule` walks through every part of it, and `rule demo` runs a live session drawn in Rule. The components are the design system in code, so a CLI built in this style can import them instead of redrawing frames by hand.
+The code tools as one MCP server for any agent: where something is defined, every use of it, who calls
+it, what it calls, a file's outline, a repo at a glance, and what an uncommitted change touches.
+TypeScript's and Pyright's language servers answer, so the answers are the compiler's, not a text
+search's. ds-next, Codex, Claude Code and Cortex Code all start the same server; there is one
+implementation, in Node, because both language servers are Node programs.
 
-The agent terminal also comes in **Rail**, the look ds-next ships today: steel blue on graphite, the dog and the cat, Cortex Code's rounded box. One CLI, two looks: `--look rail` (or `DS_LOOK=rail`) changes how it's drawn, nothing else. See [Two looks](#two-looks-rule-and-rail).
+It was rule-cli, the ds-next agent terminal in Node, until 2026-10-27: the terminal went back to
+ds-next, and the code tools, which only rule-cli had, stayed here on their own (local-019 in
+[`DECISIONS.md`](DECISIONS.md)).
 
-It started inside [ds-next](https://github.com/cwkoenigs/ds-next), in `docs/design-system-rule/`, and moved here with its history on 2026-10-26. The Rule design package it draws from (tokens, spec pages, the Claude Design transcripts) and the Python version of this CLI stay there: [`docs/design-system-rule/`](https://github.com/cwkoenigs/ds-next/tree/main/docs/design-system-rule). The Python version matches this one, except that the input box here stays closed on all four sides while you type, which prompt_toolkit couldn't do.
-
-## Run it
+## Install
 
 Needs Node 22.22 or newer (the team runs 26). The commands are the same on Mac and Windows.
 
 ```sh
-git clone https://github.com/cwkoenigs/rule-cli.git ~/Developer/rule-cli
-cd ~/Developer/rule-cli
-npm install        # installs and builds
-npm link           # puts `rule` on your PATH
-rule               # the tour: every section, enter between chapters, q quits
+git clone https://github.com/cwkoenigs/ds-code.git ~/Developer/ds-code
+cd ~/Developer/ds-code
+npm install        # installs and builds; the language servers come with it
+npm link           # puts `ds-code` on your PATH
 ```
+
+To update: `git pull`, then `npm ci`, which installs exactly what `package-lock.json` says and never
+changes it. npm 11 may warn that esbuild and fsevents have install scripts it hasn't run; both belong
+to the test tools, so there is nothing to approve.
+
+## Use it from an agent
+
+An agent starts `ds-code mcp` itself, in the repo it works in (or `ds-code mcp DIR` for another). Name
+the server `code`. On Windows, `npm link` makes `ds-code` a `.cmd`, which an agent starts through
+`cmd /c ds-code mcp`.
 
 ```sh
-rule chapters              # list the 19 chapters
-rule tour -c 3             # one chapter (3 = colour roles)
-rule screen 5              # one of the seven screens, dark and light
-rule screen                # all seven
-rule spec --json           # the spec as data
-rule html -o tour.html     # the tour as one web page, readable on a phone
-rule demo                  # a live session with a faked agent: type, / for commands, ? for keys
-rule agent                 # a real session with Cortex Code, Claude Code or Codex (see below)
+codex mcp add code -- ds-code mcp          # Codex, everywhere
+claude mcp add code -- ds-code mcp         # Claude Code, everywhere
 ```
 
-```sh
-rule demo --look rail      # the agent terminal in Rail, with a scripted agent: no login needed
-rule agent --look rail     # a real session in Rail; or set DS_LOOK=rail once in your shell profile
-rule screen --look rail    # Rail's ten screens, dark and light
-rule html --look rail      # Rail's screens as one web page (rail-screens.html), readable on a phone
-```
+- **Codex** also reads a repo's `.codex/config.toml` once you trust the project; this repo's starts it.
+- **Claude Code** also reads a repo's `.mcp.json` and asks once before starting it; this repo's starts it.
+- **Cortex Code** reads its own `mcp.json`: add `"code": {"command": "ds-code", "args": ["mcp"]}` under
+  `mcpServers`.
+- **ds-next** attaches outside MCP servers to every session in `codetools.mcp_servers()`; `code` goes
+  there, with its tools in `read_only_ids()` so they never ask.
 
-Options: `--theme dark|light` sets the theme for the prose and the demo. `--color truecolor|ansi16|none` forces the colour depth (otherwise it's whatever the terminal supports; 256-colour terminals like macOS Terminal get the palette downsampled). `--one-theme` shows each mockup only once. `--no-pause` prints the tour straight through, which also happens when the output is piped. To remove the command later: `npm rm -g rule-cli`.
-
-npm 11 may warn that esbuild and fsevents have install scripts it hasn't run. Both belong to the test tools, not to `rule`, so there is nothing to approve; don't run `npm install-scripts approve`, which would write your answer into `package.json` and block your next `git pull`. On Windows, use Windows Terminal. The old console window lacks the box-drawing characters and truecolor.
-
-### Updating
-
-```sh
-cd ~/Developer/rule-cli
-git pull
-npm ci             # installs exactly what package-lock.json says, builds, and never changes the lockfile
-```
-
-`npm ci` ("clean install") reads `package-lock.json` and installs those exact versions, deleting `node_modules` first; it refuses if `package.json` and the lockfile disagree, rather than guessing. `npm install` may rewrite the lockfile, and a rewritten lockfile is what makes `git pull` stop with "your local changes would be overwritten". If that happens, the lockfile is npm's to regenerate, not yours to keep: `git checkout -- package-lock.json`, then `git pull` and `npm ci`. Use `npm install <package>` only to add or change a dependency on purpose. `npm link` from the first install keeps working across updates.
-
-## In the demo
-
-- **Typing:** the box stays closed and grows downward when a line wraps. `←→`, `ctrl-a`, `ctrl-e` and `ctrl-u` edit the line.
-- **`/`:** opens the command popup. `↑↓` move the ■, `tab` completes, `enter` runs.
-- **A request** (anything that isn't a command) plays a faked turn. Thinking streams, then folds; each tool runs under the quadrant spinner, then lands. `esc` interrupts, and anything you type during the turn is queued until it ends.
-- **The approval dialog** replaces the box. Press `1`–`3`, or `↑↓` and `enter`; `esc` declines.
-- **`/status`, `/new`, `/standards`, `/skills`, `/scaffold`, `/help`, `?`** each print their screen.
-
-## A real agent: `rule agent`
-
-`rule agent` runs a real session with Cortex Code, Claude Code or Codex. It picks the agent the way ds-next does: `--agent cortex|claude|codex`, then `DS_AGENT`, then `agent = "..."` in `~/.ds/config.toml`, then whichever CLI is on your PATH: Cortex, Claude, Codex.
-
-```sh
-rule agent                          # whichever agent ds-next would use
-rule agent --agent cortex --connection my-conn
-rule agent --agent claude --model claude-sonnet-5-5
-rule agent --agent codex            # or DS_AGENT=codex once, in your shell profile
-```
-
-- **Cortex Code** needs the `cortex` CLI on your PATH (or `CORTEX_CODE_CLI_PATH`) and Node 22.22 or newer. It uses your Snowflake connection, as ds-next does. Cortex Code runs a repo's own hooks (from its `.cortex` or `.claude` settings) and its SDK can't switch them off, so where a repo's settings define any, `rule` shows each command and asks before the session starts; a no starts nothing.
-- **Claude Code** works with no CLI installed: the SDK carries its own. It uses your normal Claude Code login, and the session costs what a Claude Code session costs. It reads your settings and the repo's `CLAUDE.md` as usual, but runs no hooks, yours or the repo's: a cloned repo's `.claude/settings.json` could otherwise run a command as the session starts, and `rule` has no trust prompt to ask first. Hooks your organisation manages still run.
-- **Codex** works with no CLI installed either: `rule` carries a pinned Codex (`@openai/codex`) and runs it as `codex app-server`, the protocol Codex's editor extensions use. It uses your normal Codex login (`~/.codex`). Codex asks before running a command that isn't a known read and before changing a file; those questions, and ds-next's writes, come to the same approval as with the other agents. Turns end with a token count, since Codex reports no cost. `CODEX_CLI_PATH` runs a different Codex binary instead.
-- **What you see:**
-  - Thinking folds to `· Thought for 3s`.
-  - Each tool shows as ▫ while it runs, then lands as ▪ with its result as a fact (`142 lines`, `+14 −1`).
-  - Replies print as Rule Markdown: uppercase headings, code on the surface colour.
-  - Each turn ends with `N tools  12.3s  $0.0123` (Cortex reports no cost).
-- **Approvals:** anything that writes a file or runs a command opens the approval dialog, even when your Claude Code settings allow it (an `allow` rule, or a "don't ask again" saved there). `1` yes, `2` don't ask again for that tool this session, `3` or `esc` declines and stops the turn so you can say what to do instead. Reading never asks: ds's read-only tools, `rule_spec`, and every `code` tool.
-- **Keys:** `esc` interrupts a turn, `ctrl-o` opens the last fold, and messages typed mid-turn are queued.
-- **Commands:** `/status`, `/model <name>`, `/clear` (new conversation) and `/exit` are local; any other `/command` goes to the agent.
-- **Stalls:** a turn silent for 10 minutes, outside an approval, is interrupted, as in ds-next. The next message carries on the same session.
-
-### The tools for any agent: `rule mcp`
-
-`rule mcp` serves the same tools, ds-next's and the code tools, as an MCP server over stdio, for Codex, Cortex Code or Claude Code run on their own. Each tool says whether it only reads, and the agent asks about the rest by its own rules. This repo's `.codex/config.toml` and `.mcp.json` already start it as `ds`. To have it everywhere in Codex:
-
-```sh
-codex mcp add ds -- rule mcp
-```
-
-### The code tools
-
-Eight read-only tools answer what text search can't, from language servers that come with `rule`: TypeScript 7's native server for TypeScript and JavaScript, and Pyright for Python. Both are Microsoft's, both install with `npm install` (so through a registry mirror such as Nexus), both run on your machine and send nothing anywhere. There is nothing else to install or to refresh.
+## The tools
 
 | Tool | Answers |
 |---|---|
@@ -105,125 +56,57 @@ Eight read-only tools answer what text search can't, from language servers that 
 | `callees` | What a function calls, in the repo and outside it |
 | `change_impact` | The uncommitted changes, symbol by symbol, and the files that depend on them without being changed |
 
-A server starts on the first call that needs it (under a second here, a few seconds on a large repo) and stops with the session. TypeScript's follows the nearest `tsconfig.json`, so references from files outside its `include` (this repo's tests, for instance) aren't found; Pyright reads the packages in the repo's `.venv` or `venv` when there is one, and never runs its `python`.
+Every tool only reads, and says so, so no agent asks before running one. A server starts on the first
+call that needs it (under a second here, a few seconds on a large repo) and stops when the agent
+hangs up.
 
-**Trying them.** You ask in words; the agent picks the tool. Some prompts that reach each one:
+**Trying them.** You ask in words; the agent picks the tool:
 
 | Ask | Tool |
 |---|---|
 | "give me an overview of this repo" | `repo_overview` |
-| "outline src/agent/AgentApp.tsx" | `file_symbols` |
-| "where is permissionGate defined?" | `find_symbol` |
-| "what's the AgentApp on line 184 of src/cli.tsx?" | `definition` |
-| "where is openSession used?" | `references` |
-| "who calls permissionGate?" | `callers` |
-| "what does sessionParts call?" | `callees` |
+| "outline src/tools.ts" | `file_symbols` |
+| "where is CodeIntel defined?" | `find_symbol` |
+| "where is codeTools used?" | `references` |
+| "who calls changedLines?" | `callers` |
 | "what would my uncommitted changes break?" | `change_impact` |
 
-The first real run, on a Mac on 2026-10-26, asked "who calls permissionGate?" and got, from `callers`: two direct callers, `openSession` at `src/agent/backend.ts:244`, which builds the gate for the Claude and Cortex sessions, and `openCodexSession` at `src/agent/codex.ts:173`, which builds it for Codex and is itself called from `openSession` at line 237, so every session's approvals go through the one gate, as `AGENTS.md` says.
+**What each server sees.** TypeScript's reads one `tsconfig.json`'s files, so before `references` and
+`callers` ds-code also opens the repo's files that mention the name: uses in tests or scripts that no
+`tsconfig.json` includes are found too. Pyright reads every Python file in the repo, and the packages
+in its `.venv` or `venv` when there is one; it never runs the repo's `python`.
 
-**Why these and not Serena or a code graph.** ds-next attaches [Serena](https://github.com/oraios/serena) and [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) for the same job. Serena is a middleman to the same TypeScript server (and GPL-3.0, and it reports its use to its maker on every start); codebase-memory-mcp keeps a whole-repo map, but its npm and PyPI packages download the real binary from GitHub, around a registry mirror. The code tools talk to the servers directly, so there is nothing for a middleman to do and nothing to put past security beyond `npm install`. `callers` to a depth, `repo_overview` and `change_impact` cover what the graph answered. `DECISIONS.md` local-010 weighs the options. If Serena is installed from before, it isn't used; `uv tool uninstall serena-agent` removes it.
+**With the canon.** The canon's `code_search`, `code_get` and `code_add` (from `ds-next mcp`) answer
+"has the team already written this?", across repos; these tools answer "what is in this repo, and what
+does my change touch?". An agent uses the first before writing code and these before changing it.
 
-### At work: Nexus, and what leaves the machine
+**Why these and not Serena or a code graph.** ds-next attached [Serena](https://github.com/oraios/serena)
+and [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) for the same job. Serena is a
+middleman to the same TypeScript server (and GPL-3.0, and it reports its use to its maker on every
+start); codebase-memory-mcp keeps a whole-repo map, but its npm and PyPI packages download the real
+binary from GitHub, around a registry mirror. These tools talk to the servers directly. `DECISIONS.md`
+local-010 weighs the options.
 
-- **Everything installs from npm,** so a registry mirror such as Nexus is all `rule` needs: its dependencies, the pinned Codex, TypeScript's server and Pyright all come with `npm ci`. Nothing is downloaded from anywhere else, and no install script needs approving.
-- **The tools run on your machine.** The `ds` tools read the canon and skills-os from disk; the `code` tools ask language servers running as child processes; neither makes a network request. Cortex Code's own code index (tgrep) needs an embedding model enabled on your Snowflake account; the code tools need nothing from the account.
-- **What leaves is what the agent sends its model:** your prompts, the files it reads, and the tools' answers, to OpenAI for Codex, Anthropic for Claude Code, or Snowflake for Cortex Code. That is true of every coding agent, with or without these tools, so which agent may see a repo that holds PHI is your compliance team's call, not something `rule` changes.
+## At work
 
-### ds-next's tools
-
-The agent gets ds-next's tools, ported to TypeScript in `src/ds/`, with the same names, descriptions and arguments, and ds-next's own system prompt:
-
-- **Reads, never asked:** `canon_list`, `canon_read`, `skills_list`, `skill_read`, `project_status`, `scaffold_list`, `scaffold_get`, `block_list`, `block_get`, `code_search`, `code_get`, `snowflake_search`.
-- **Writes, each through the approval dialog:** `scaffold_project` (only from a scaffold the agent fetched this session), `adopt_repo`, `block_add`, `code_add`, `capture`.
-- **Where ds-next attaches the code graph and Serena,** `rule` serves its own code tools (above), with nothing to install.
-
-They read the canon and skills-os where ds-next does: `DS_CANON` and `DS_SKILLS`, else `~/Developer`, `~/code` or `~/.ds`. Without a canon the session still starts, and each tool that needs it says what to set up.
-
-`code_get` and `code_add` cut a canon module down to the symbols asked for, using Python's own syntax tree. That one step runs ds-next's functions, copied unchanged into `python/code_cut.py`, with Python 3.10 or newer: `DS_PYTHON` if set, else `uv`, `python3`, `python` (or `py -3` on Windows). Repos created here get the same pre-push hook as ds-next's, which runs `ds-next reconcile`.
-
-**Parity with ds-next.** `test/parity/run.sh` runs ds-next's Python tools and this port through the same 229 steps on a real canon and skills-os, then compares everything. That covers every standard, skill, scaffold and block read, `code_get` on every indexed symbol, a project created from each accepted scaffold (every file compared), `block_add`, `code_add`, `capture`, adopting two existing repos, and reconcile on broken manifests.
-
-```sh
-DS_CANON=~/Developer/canon DS_SKILLS=~/Developer/skills-os sh test/parity/run.sh
-```
-
-It runs ds-next's Python from a ds-next checkout: `DS_NEXT`, else `~/Developer/ds-next`, with its environment set up (`uv sync` there).
-
-Two differences are expected:
-- `canon_read` of an unknown id: ds-next's message carries extra quotes, a side effect of Python's `KeyError`.
-- A manifest that isn't valid TOML: the error is worded by a different parser.
-
-Any other difference fails the check (it exits 1). It needs ds-next with cwkoenigs/ds-next#6, where a block's manifest table lists its files and no metadata is written through a link, as here.
-
-**Where the port departs from ds-next, on purpose:**
-- **`adopt_repo` is offered to the agent.** ds-next defines it and its prompt tells the agent to use it, but it's missing from the tools ds-next registers.
-- **List arguments are read as lists.** A list passed for `tags` or `ids` reads as the comma-separated string; ds-next would read the list's Python text.
-- **A tool that fails says why.** A canon that no longer matches its index returns an `ERROR:` result instead of an exception.
-
-## Two looks: Rule and Rail
-
-`--look` picks how `rule agent`, `rule demo`, `rule screen` and `rule html` are drawn. Default: `$DS_LOOK`, else `rule`. The tour and the spec are Rule's own, so they don't change.
-
-| | Rule | Rail |
-|---|---|---|
-| What it is | This design system: ink, one red, heavy square frames, the canoe | ds-next's: steel blue on graphite, the dog and the cat, ok/warn/err in green, amber and red |
-| A turn | `━━ 03 ━━` opens it; ■ the agent, ▫ a running tool that lands as ▪, `└` its result | The box you typed in stays in the scrollback; `#3`, then one rail: ● the agent, `│ → Tool`, `│   ⎿ result`, `╰ #3 · 2 tool calls · 12.3s · $0.01` |
-| Thinking | Folds to `· Thought for 3s` (`ctrl-o` opens it) | Stays private, as ds-next and Claude Code keep it; the spinner says `Thinking` |
-| The box | Heavy, square, as wide as the terminal; a bare status row under it | Cortex Code's: rounded, the session tag (`New session`, `#2`) on a band in the top rule, the `/` menu below, a toolbar under it: the folder, where the repo stands against the canon, model, effort, connected |
-| Approval | A red dialog in place of the box: `1` `2` `3`, or `↑↓` and `enter` | A warn-edged frame on the rail, `Allow Bash?`, the whole input; type `y`, `a` or `n` and `enter`. Enter alone asks again |
-| Spinner | `▘ Drafting  4s  esc interrupts`, quadrants at 160 ms | `◐ Running canon_read · 4s · ctrl-c interrupts`, at 125 ms |
-| `ctrl-c` | Leaves | Interrupts a turn; at the prompt it clears the line, and a second press within two seconds leaves |
-
-Everything else is shared: the agent and its tools, the queue, `esc`, the watchdog, and the commands (`/status`, `/model`, `/last`, `/clear`, `/help`, `/exit`).
-
-**Rail comes from ds-next itself.** The palette, ANSI-16 fallbacks, glyphs, spinner, grid and mascot in `src/rail/tokens.ts` are ds-next's `src/ds_next/ui_style.py` values, and a test reads that file and checks every one. It finds ds-next at `DS_NEXT`, else `~/Developer/ds-next`, and skips those checks when there is no checkout. The builders in `src/rail/builders.ts` are its functions with the same names (`run`, `result`, `footer`, `frame`, `banner`, `promptBox`, `toolbar`...). The owner's departures from the design handoff are kept: the rounded box with the session tag, the brighter banner, ctrl-c twice to leave.
-
-**Where Rail here departs from ds-next:**
-- **Long lines wrap inside the box,** and the box that stays in the scrollback keeps the whole line. ds-next's box scrolls sideways and its echo is cut at the box's width.
-- **The box stays up during a turn,** so you can queue the next message. ds-next shows only the spinner. `esc` interrupts too, besides `ctrl-c`.
-- **`ctrl-o` opens the last tool output,** as the result line says. ds-next prints that hint but only `/last` does it; `/last` works here as well.
-- **The banner names the agent** (Cortex Code or Claude Code; ds-next runs only Cortex) and points to `/help` and `?`. ds-next's local `/new`, `/adopt`, `/canon`, `/skills`, `/docs` and `/captures` forms aren't ported. Asking for those things in words goes to the agent, which has the same tools.
-- **Markdown** headings are bold, flush left; fenced code is muted. Rich centres headings and highlights code.
-
-**Fixed along the way, in both looks:** the box could send an older line. Keys go to the handler from the last render, so when `enter` came before React had redrawn after the previous key (fast typing, a paste, a busy machine), it sent what the line held before. The approval and the dialog had the same fault: a quick `y` `enter` could read as an empty answer. Each now keeps what was typed where every key reads it at once.
-
-## What's where, and what changed
-
-- [`ARCHITECTURE.md`](ARCHITECTURE.md): how a turn flows, the rules the code keeps, every file and what
-  it holds, where to make a given change, and the code tools and how Codex, Claude Code and Cortex
-  reach them.
-- [`DECISIONS.md`](DECISIONS.md): the decisions so far and the options weighed.
-- [`CHANGELOG.md`](CHANGELOG.md): what changed, by pull request.
-- [`AGENTS.md`](AGENTS.md): what any agent working here reads first.
-
-## Using the components
-
-```tsx
-import {render} from 'ink';
-import {TurnRule, You, Tool, Outcome} from './components/rule.js';
-import {Footing, useLineEditor} from './components/live.js';
-
-<TurnRule n={3} />
-<You>add a --since flag</You>
-<Tool name="Bash" args="uv run pytest -q" result="13 passed in 1.42s" more={11} />
-<Outcome kind="warn" subject="security" detail="1 finding  /explain security" />
-```
-
-Write the transcript once with `useTranscript()` and `<Transcript>`, built on Ink's `<Static>`. Redraw only the footing.
+- **Everything installs from npm,** so a registry mirror such as Nexus is all ds-code needs: TypeScript's
+  server and Pyright come with `npm ci`. Nothing is downloaded from anywhere else.
+- **Nothing leaves the machine.** The servers run as child processes and make no network request. What
+  leaves is what the agent sends its model, as with any coding agent.
 
 ## Checks
 
 ```sh
-npm test           # 103 tests: every row fits 80 columns and every frame is exactly 80, the box stays closed
-                   # while wrapping, the spec is complete, the demo, tour and agent session driven by
-                   # keystrokes (the agent scripted) in both looks, Rail's tokens against ds-next's
-                   # ui_style.py, the permission gate, both SDKs build all 17 tools, Codex against a
-                   # stand-in and end to end with the real app-server and a stand-in model, rule mcp,
-                   # the ds port on a small canon, the code tools against the real language servers
-                   # on two small projects, a git repo with changes and this repo, and that
+npm test           # 27 tests: the tools against the real servers on a small TypeScript project, a small
+                   # Python one, a file no tsconfig includes, a git repo with changes and this repo; the MCP
+                   # server and that it stops on hang-up; that nothing the repo carries runs and nothing outside it is read; and that
                    # ARCHITECTURE.md names every file
-npm run typecheck
+npm run typecheck  # the source and the tests
 ```
 
-Dependencies are pinned to exact versions, so every machine gets the same ones, and were all at their latest release on 2026-10-25 (`npm outdated` lists nothing, `npm audit` finds nothing). Ink 8, chalk 6 and vitest 5 need Node 22, and the Cortex SDK 22.22. `@snowflake/cortex-agent-sdk` is at 0.0.3, one release ahead of the Python package ds-next pins (`snowflake-cortex-agent-sdk==0.0.2`). Like 0.0.2, it hangs when its CLI is missing, so `rule agent` checks for the CLI first. `typescript` and `pyright` are runtime dependencies: the code tools run their language servers.
+## What's where
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): how a call flows, the rules the code keeps, every file.
+- [`DECISIONS.md`](DECISIONS.md): the decisions so far, including rule-cli's, and the options weighed.
+- [`CHANGELOG.md`](CHANGELOG.md): what changed, by pull request.
+- [`AGENTS.md`](AGENTS.md): what any agent working here reads first.

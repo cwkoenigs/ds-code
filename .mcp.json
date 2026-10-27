@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "ds": {
-      "command": "rule",
+    "code": {
+      "command": "ds-code",
       "args": [
         "mcp"
       ]

@@ -1,5 +1,5 @@
-# The required checks (AGENTS.md) on the team's two systems, at the oldest Node rule supports and
-# the one the team runs. Tests that need a ds-next checkout, a canon or uv skip, and say so.
+# The required checks (AGENTS.md) on the team's two systems, at the oldest Node ds-code supports and
+# the one the team runs.
 name: test
 
 on:

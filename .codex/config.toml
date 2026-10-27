@@ -1,7 +1,7 @@
-# Codex: ds-next's tools and the code tools for this repo, from `rule mcp`. Codex loads a project's own
-# config only after you trust the project (it asks on first run). Needs `rule` on your PATH (`npm link`).
-# Each tool says whether it only reads; Codex asks about the rest.
-[mcp_servers.ds]
-command = "rule"
+# Codex: the code tools for this repo, from `ds-code mcp`. Codex loads a project's own config only after
+# you trust the project (it asks on first run). Needs `ds-code` on your PATH (`npm link`). Every tool
+# only reads.
+[mcp_servers.code]
+command = "ds-code"
 args = ["mcp"]
 startup_timeout_sec = 30
