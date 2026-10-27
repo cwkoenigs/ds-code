@@ -270,8 +270,10 @@ from its git history. Each is dated when it was made.
   3. **Wait for the first diagnostics of the file opened at start**: chosen. Pyright publishes them
      after it has logged "Found N source files", even for a file in an excluded folder.
 - **Decision:** `ServerSpec.settlesOnDiagnostics` marks Pyright; `CodeIntel.server` waits on
-  `LanguageServer.diagnosed` for the anchor file, at most 30 s, before the first answer. A server
-  that stops ends the wait.
+  `LanguageServer.diagnosed`, at most 30 s, before the first answer: for the first diagnostics of any
+  file, since the anchor is the one file open and Pyright checks only open files. Not the anchor's
+  URI: on Windows Pyright spells it its own way (`file:///c%3A/...`), and the wait ran the full 30 s.
+  A server that stops ends the wait.
 - **Consequences:** The first Python call takes as long as Pyright needs to find the repo's files
   (about a quarter of a second for the fixture). If Pyright never publishes, the call waits 30 s and
   then answers as it can.

@@ -68,9 +68,11 @@ export class CodeIntel {
 				// The TypeScript server learns the project from its first open file: give it one of the repo's.
 				const anchor = listFiles(this.root).find(f => languageOf(f) === lang && !f.endsWith('.d.ts'));
 				if (anchor) {
-					const uri = s.openFile(join(this.root, anchor));
-					// Until Pyright has found the repo's files, it answers from the open ones: no symbol, or too few uses.
-					if (s.spec.settlesOnDiagnostics) await s.diagnosed(uri, SETTLE_MS);
+					s.openFile(join(this.root, anchor));
+					// Until Pyright has found the repo's files, it answers from the open ones: no symbol, or too few
+					// uses. The anchor is the one open file, and Pyright checks only open files, so its first
+					// diagnostics are the anchor's, which come once it has found the rest.
+					if (s.spec.settlesOnDiagnostics) await s.diagnosed(SETTLE_MS);
 				}
 				return s;
 			} catch (err) {

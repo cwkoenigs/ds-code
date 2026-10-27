@@ -51,8 +51,8 @@ export class LanguageServer {
 	private next = 1;
 	private waiting = new Map<number, {method: string; resolve: (v: unknown) => void; reject: (e: Error) => void}>();
 	private open = new Map<string, {version: number; text: string}>();
-	private diagnosedUris = new Set<string>();
-	private onDiagnosed = new Map<string, (() => void)[]>();
+	private diagnosed_ = false; // the server has published diagnostics for some file
+	private onDiagnosed: (() => void)[] = [];
 	private stderr = '';
 	private stopped: string | undefined;
 	/** Resolves once the server has answered `initialize`; rejects if it never does. */
@@ -70,8 +70,7 @@ export class LanguageServer {
 			this.stopped = why;
 			for (const w of this.waiting.values()) w.reject(new ServerStopped(`${w.method}: ${why}`));
 			this.waiting.clear();
-			for (const done of [...this.onDiagnosed.values()].flat()) done(); // nothing more is coming
-			this.onDiagnosed.clear();
+			for (const done of this.onDiagnosed.splice(0)) done(); // nothing more is coming
 		};
 		this.child.on('error', err => stop(`${spec.name} did not start: ${err.message}`));
 		this.child.on('exit', code => {
@@ -147,16 +146,17 @@ export class LanguageServer {
 		return uri;
 	}
 
-	/** Resolves once the server has published diagnostics for a file, or after `ms`, or when it stops. */
-	diagnosed(uri: string, ms = this.timeoutMs): Promise<void> {
-		if (this.diagnosedUris.has(uri) || this.stopped) return Promise.resolve();
+	/** Resolves once the server has published diagnostics for any file, or after `ms`, or when it
+	 *  stops. Any file, not one URI: Pyright spells a Windows URI its own way (file:///c%3A/...). */
+	diagnosed(ms = this.timeoutMs): Promise<void> {
+		if (this.diagnosed_ || this.stopped) return Promise.resolve();
 		return new Promise<void>(resolve => {
 			const t = setTimeout(done, ms);
 			function done() {
 				clearTimeout(t);
 				resolve();
 			}
-			this.onDiagnosed.set(uri, [...(this.onDiagnosed.get(uri) ?? []), done]);
+			this.onDiagnosed.push(done);
 		});
 	}
 
@@ -218,16 +218,15 @@ export class LanguageServer {
 		}
 		if (m.id === undefined) {
 			// a notification: diagnostics, a log line, progress; only diagnostics' arrival matters
-			if (m.method === 'textDocument/publishDiagnostics') this.published(String((m.params as {uri?: string} | undefined)?.uri ?? ''));
+			if (m.method === 'textDocument/publishDiagnostics') this.published();
 			return;
 		}
 		this.write({jsonrpc: '2.0', id: m.id, ...this.answer(m.method, m.params)});
 	}
 
-	private published(uri: string): void {
-		this.diagnosedUris.add(uri);
-		for (const done of this.onDiagnosed.get(uri) ?? []) done();
-		this.onDiagnosed.delete(uri);
+	private published(): void {
+		this.diagnosed_ = true;
+		for (const done of this.onDiagnosed.splice(0)) done();
 	}
 
 	/** The client's side of the protocol: settings when asked, nothing to register, no progress UI. */

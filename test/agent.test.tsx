@@ -1,5 +1,5 @@
 import {render} from 'ink-testing-library';
-import {existsSync, mkdirSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -387,7 +387,7 @@ describe('backends', () => {
 	}, 30_000);
 
 	it('still lets Claude Code read in the project without asking', async () => {
-		const dir = mkdtempSync(join(tmpdir(), 'rule-read-'));
+		const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'rule-read-'))); // the long name: Windows' temp folder is C:\Users\RUNNER~1, which Claude Code sees as outside
 		writeFileSync(join(dir, 'notes.txt'), 'hello\n');
 		const api = await fakeAnthropic({name: 'Read', input: {file_path: join(dir, 'notes.txt')}});
 		await offlineClaude(dir, mkdtempSync(join(tmpdir(), 'rule-claude-home-')), api.url, async () => {

@@ -9,6 +9,10 @@ the CLI started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Fixed
+- On Windows, found by the first CI run: `scaffold_project` refused every new project, since its path
+  kept the short form (`C:\Users\RUNNER~1`) that git expands, as Python's `Path.resolve()` does; tool
+  calls showed paths with `\` where the rest of rule shows `/`; and the first Pyright call waited 30 s,
+  since Pyright spells a Windows file URI its own way. (#5)
 - From the second review of #5: an approval was broken to width before control characters became
   symbols, so 90 ESCs (or keycap emoji, or tabs) still pushed a command's end past the frame; the
   Cortex hooks question showed `sh` for a hook whose `args` held the rest, and reused a yes when the

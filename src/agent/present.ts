@@ -1,6 +1,6 @@
 // How an agent's tool calls read in Rule: a short name, the one argument that matters, a result
 // as a fact (142 lines, +14 −1), and what the approval dialog says.
-import {join, relative} from 'node:path';
+import {join, relative, sep} from 'node:path';
 import * as b from '../builders.js';
 import {bold, breakLines, type Row, s} from '../text.js';
 
@@ -41,7 +41,7 @@ export function toolArgs(name: string, input: Record<string, unknown>, cwd: stri
 		case 'Edit':
 		case 'MultiEdit':
 		case 'NotebookEdit':
-			return path ? relative(cwd, path) || path : '';
+			return path ? relative(cwd, path).split(sep).join('/') || path : '';
 		case 'Grep':
 		case 'Glob':
 			return oneLine(str(input, 'pattern', 'query'));
@@ -112,7 +112,7 @@ export function askContent(name: string, input: Record<string, unknown>, cwd: st
 			const {first} = resultSummary(name, input, '', false);
 			// Codex's patches can change several files, or delete or move one: each, as it will happen.
 			const files = Array.isArray(input['files']) ? (input['files'] as {kind?: string; path?: string; to?: string}[]) : [];
-			const rel = (p = '') => relative(cwd, p) || p;
+			const rel = (p = '') => relative(cwd, p).split(sep).join('/') || p;
 			const where = files.length ? files.flatMap(f => whole(`${f.kind ?? 'update'} ${rel(f.path)}${f.to ? ` → ${rel(f.to)}` : ''}`)) : whole(toolArgs(name, input, cwd));
 			return {title: files.length > 1 ? 'Edit files' : shown === 'Write' ? 'Write file' : 'Edit file', body: [...where, [s(first, 'muted')]]};
 		}
@@ -122,7 +122,7 @@ export function askContent(name: string, input: Record<string, unknown>, cwd: st
 			return {title: "This repo's hooks", body: [...whole(str(input, 'command')), [s(fit(str(input, 'description')), 'muted')]]};
 		// ds's own writes say what they will create, in the person's terms
 		case 'scaffold_project': {
-			const where = relative(cwd, join(str(input, 'directory') || cwd, str(input, 'name'))) || str(input, 'name');
+			const where = relative(cwd, join(str(input, 'directory') || cwd, str(input, 'name'))).split(sep).join('/') || str(input, 'name');
 			return {
 				title: 'Create project',
 				body: [[bold(fit(where))], [s(fit(`${str(input, 'scaffold')} v${String(input['scaffold_version'] ?? '?')}  ${str(input, 'purpose')}`), 'muted')]],

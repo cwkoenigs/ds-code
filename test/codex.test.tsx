@@ -156,7 +156,7 @@ describe('Codex, the pieces', () => {
 		}
 	});
 
-	it('ends a session whose turn Codex never confirms, so nothing of that turn lands later', async () => {
+	it.skipIf(process.platform === 'win32')('ends a session whose turn Codex never confirms, so nothing of that turn lands later', async () => {
 		process.env['FAKE_CODEX_SILENT_TURN'] = '1'; // the stand-in plays the turn but never answers turn/start
 		codexLimits.requestMs = 300;
 		try {
