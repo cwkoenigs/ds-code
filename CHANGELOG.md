@@ -2,11 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Nothing has been
-released yet, so everything is under Unreleased. This repo was rule-cli until #6; the entries before
-it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI started (`cwkoenigs/ds-next#N`).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This repo was rule-cli
+until #6; the entries before it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI
+started (`cwkoenigs/ds-next#N`).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-10-29
+
+The first release: the eight code tools as one MCP server, tagged so the repos that install ds-code
+(canon's bootstrap, the work-computer bundles) can pin a version instead of a commit. (#7, local-020)
 
 ### Changed
 - rule-cli becomes ds-code: the code tools alone, as one MCP server any agent starts with `ds-code mcp`
@@ -22,8 +27,6 @@ it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI starte
 - `ds-code mcp` kept running, with its language servers, after the agent closed stdin, so every
   session end waited for the agent to give up on it. It now stops on the end of stdin or SIGTERM, and
   waits at most 2 s for each language server to shut down before killing it. (#6)
-
-### Fixed
 - On Windows, found by the first CI run: `scaffold_project` refused every new project, since its path
   kept the short form (`C:\Users\RUNNER~1`) that git expands, as Python's `Path.resolve()` does; tool
   calls showed paths with `\` where the rest of rule shows `/`; and the first Pyright call waited 30 s,
@@ -131,3 +134,6 @@ it are rule-cli's. Pull requests before #1 were in ds-next, where the CLI starte
 
 ### Security
 - The four `npm audit` advisories (vitest, tinypool, zod) are gone. (cwkoenigs/ds-next#4)
+
+[Unreleased]: https://github.com/cwkoenigs/ds-code/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/cwkoenigs/ds-code/releases/tag/v0.1.0

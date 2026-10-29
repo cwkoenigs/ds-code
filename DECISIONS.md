@@ -465,3 +465,25 @@ from its git history. Each is dated when it was made.
   ds-code and its language server.
 - **Review date:** when ds-next's `code` server is in use at work.
 
+
+## local-020: The first release is 0.1.0, not 0.2.0
+
+- **Status:** Accepted
+- **Date:** 2026-10-29
+- **Context:** Nothing in this repo had ever been tagged. canon and ds-next cut v0.2.0 on 2026-10-28 and
+  bundled ds-code at whatever HEAD was, so the only name for the code they shipped was a commit hash.
+  `package.json` has said 0.1.0 since the repo began.
+- **Options considered:**
+  1. **Tag v0.2.0 to match canon and ds-next**: reads as if the repos move together, which they do not;
+     ds-code changes when the language servers or the tools do, not when the canon does.
+  2. **Tag v0.1.0, as `package.json` says**: chosen. The version is the package's own, and every
+     changelog entry so far is the road to this first working release.
+  3. **Keep shipping from HEAD**: the bundles and `npm link` work without a tag, but nothing can pin.
+- **Decision:** Tag `v0.1.0` on main at this pull request. The changelog's Unreleased section becomes
+  `0.1.0 - 2026-10-29` with one Fixed section (the #6 and #5 entries were under two), and a fresh
+  Unreleased opens above it with Keep a Changelog's compare links.
+- **Consequences:** Installs may `git checkout v0.1.0`; the README's `git pull` path is unchanged.
+  Each later release bumps `package.json` and `package-lock.json` by npm (`npm version`), never by hand.
+- **Validation:** `npm run typecheck` and `npm test` (27 tests) pass on the release commit; CI runs both
+  on macOS and Windows for the pull request.
+- **Review date:** at the next release, to see whether the version still tells the installs apart.
