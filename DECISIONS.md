@@ -515,3 +515,31 @@ from its git history. Each is dated when it was made.
 - **Validation:** `chmod 644 dist/cli.js && npm run build` leaves `dist/cli.js` at 755; `npm run typecheck`
   and `npm test` pass.
 - **Review date:** when the package is first installed from a registry rather than a checkout.
+
+## local-022: The manifest declares the contracts other repositories hold ds-code to
+
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:** canon adr-002 compiles a cross-repo graph from each repo's `[provides]` and `[uses]`
+  plus a scan of every registered clone for mentions, so that `change_impact` can one day say which
+  other repos a change here reaches. ds-code's contracts are the command canon's scripts and
+  ds-next's setup run (`ds-code mcp`, `ds-code --version`) and the tool names ds-next's prompt and
+  every scaffolded AGENTS.md name.
+- **Options considered:**
+  1. **All eight tool names:** `definition`, `references`, `callers` and `callees` are plain words;
+     the scan would match prose about anything.
+  2. **Commands only:** misses ds-next's prompt naming the tools, which is the coupling that would
+     break first if a tool were renamed.
+  3. **The two commands and the four tool names that are not plain words:** chosen. The first compile
+     found ds-next naming exactly those four without declaring them; it now does.
+- **Decision:** the two tables at the end of `.ds/manifest.toml`; `[uses]` names canon's `index.json`
+  (the standards adopted here resolve through it), `ds-next mcp` (AGENTS.md sends agents to it) and
+  the four skills AGENTS.md lists. The code is unchanged; `tools.ts` stays read-only and reads
+  nothing new. `change_impact` reading the index's `repos` section is adr-002's step 5.
+- **Consequences:** renaming a tool or the `mcp` subcommand will show, once canon's pipeline runs,
+  every repo that names it. Until canon and skills-os have manifests, the uses pointing at them are
+  reported as unresolved.
+- **Validation:** `python canon/scripts/build_repos.py ~/Developer` (canon pull request #10) lists
+  ds-next → ds-code as declared and mentioned for the server and the four tools; `npm run typecheck`
+  and `npm test` pass.
+- **Review date:** when step 5 lands, or 2026-11-30 with the ADR.

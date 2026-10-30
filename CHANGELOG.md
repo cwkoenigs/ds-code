@@ -8,6 +8,12 @@ started (`cwkoenigs/ds-next#N`).
 
 ## [Unreleased]
 
+### Added
+- `.ds/manifest.toml` declares what this repo provides to other repositories (`ds-code mcp`,
+  `ds-code --version`, and the four tool names that are not plain words) and what it uses (canon's
+  `index.json`, `ds-next mcp`, four skills-os skills), for the cross-repo graph canon's pipeline
+  compiles (canon adr-002). Nothing in the code reads it yet; `change_impact` will. (#11, local-022)
+
 ### Fixed
 - `ds-code` runs after a reinstall over an existing link. The `build` script sets the executable bit on
   `dist/cli.js` right after `tsc`, and `prepare` goes through `build`; before, only `npm link`'s first

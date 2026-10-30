@@ -8,3 +8,12 @@ lint_cmd = "npm run typecheck"
 ds_version = "0.1.0"
 canon = "~/Developer/canon"
 canon_index = "2026-10-20"
+
+[provides]                 # what other repositories run or must agree with (canon adr-002); matched as text
+commands = ["ds-code mcp", "ds-code --version"]
+tools = ["repo_overview", "file_symbols", "find_symbol", "change_impact"]   # the names that are not plain words; definition, references, callers, callees would match prose
+
+[uses]                     # one key per registered repository, in the words its [provides] uses
+canon = ["index.json"]              # the standards this repo adopted resolve through it
+ds-next = ["ds-next mcp"]           # AGENTS.md sends agents to it for the canon
+skills-os = ["so-capture", "so-changes", "so-build-feature-interview", "so-bug-review-interview"]
