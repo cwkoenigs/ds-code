@@ -487,3 +487,29 @@ from its git history. Each is dated when it was made.
 - **Validation:** `npm run typecheck` and `npm test` (27 tests) pass on the release commit; CI runs both
   on macOS and Windows for the pull request.
 - **Review date:** at the next release, to see whether the version still tells the installs apart.
+
+## local-021: The build sets the executable bit, not the installer
+
+- **Status:** Accepted
+- **Date:** 2026-10-29
+- **Context:** canon's `bootstrap.sh` installs ds-code with `npm ci` (which builds through `prepare`)
+  and `npm link`. npm sets the bin's mode only when it creates the global link. On a machine where the
+  link already pointed at `~/Developer/ds-code` and the clone underneath was replaced (the reinstall
+  path in the guide: move the repos aside, run the installer again), `npm link` was a no-op and the
+  freshly compiled `dist/cli.js` kept mode 644, so `ds-code` failed with "permission denied" while
+  bootstrap reported it linked.
+- **Options considered:**
+  1. **`chmod +x` in bootstrap.sh after `npm link`**: fixes one installer; a wheel-less `npm install -g`
+     or a Windows checkout would each need their own.
+  2. **Unlink and relink in bootstrap.sh**: churns the global link on every update to fix a mode bit.
+  3. **The build sets the mode (`postbuild`), and `prepare` runs `build`**: chosen. Whatever builds the
+     package produces a runnable bin; `fs.chmodSync` is a no-op on Windows, where npm's `.cmd` shim is
+     what runs.
+- **Decision:** `package.json` scripts are `build` (tsc), `postbuild` (`chmodSync("dist/cli.js", 0o755)`),
+  `prepare` (`npm run build`). bootstrap.sh gains a check that `ds-code --version` answers after the link
+  (cwkoenigs/canon, the lifecycle pull request).
+- **Consequences:** Reinstalling over an existing link works. The only Node code outside `src/` is the
+  one-line `postbuild`.
+- **Validation:** `chmod 644 dist/cli.js && npm run build` leaves `dist/cli.js` at 755; `npm run typecheck`
+  and `npm test` pass.
+- **Review date:** when the package is first installed from a registry rather than a checkout.
