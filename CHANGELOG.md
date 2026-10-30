@@ -9,9 +9,10 @@ started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Fixed
-- `ds-code` runs after a reinstall over an existing link. The build now sets the executable bit on
-  `dist/cli.js` itself (`postbuild`), and `prepare` goes through `build`; before, only `npm link`'s
-  first run set it, so a rebuilt clone at the same path left `ds-code` with "permission denied". (#8, local-021)
+- `ds-code` runs after a reinstall over an existing link. The `build` script sets the executable bit on
+  `dist/cli.js` right after `tsc`, and `prepare` goes through `build`; before, only `npm link`'s first
+  run set it, so a rebuilt clone at the same path left `ds-code` with "permission denied". The chmod sat
+  in a `postbuild` hook first, which `ignore-scripts=true` skips; an external review caught it. (#8, #9, local-021)
 
 ## [0.1.0] - 2026-10-29
 

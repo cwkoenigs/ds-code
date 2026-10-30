@@ -13,8 +13,7 @@
     "node": ">=22.22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "postbuild": "node -e \"require(\\\"fs\\\").chmodSync(\\\"dist/cli.js\\\", 0o755)\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"require(\\\"fs\\\").chmodSync(\\\"dist/cli.js\\\", 0o755)\"",
     "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
