@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {z} from 'zod';
 import {type CallHierarchyItem, type DocumentSymbol, type IncomingCall, kindName, LanguageServer, type Location, type OutgoingCall, type Position, type Range, type SymbolInformation, toPath} from './lsp.js';
+import {type Changed, crossRepo} from './graph.js';
 import {changedLines, isFile, isRepo, languagesIn, listFiles, mentioning, overview, realPath, realWithin, within} from './repo.js';
 import {type Language, languageOf, serverSpec} from './servers.js';
 
@@ -346,13 +347,24 @@ export class CodeIntel {
 		const lines: string[] = [];
 		const notCode: string[] = [];
 		const dependents = new Set<string>();
+		const touched: Changed = {paths: [], symbols: [], text: ''}; // for the cross-repo lines: every changed path, the changed symbols, the changed text
+		const read = (file: string): string => {
+			try {
+				return readFileSync(join(this.root, file), 'utf8').slice(0, 200_000);
+			} catch {
+				return '';
+			}
+		};
 		for (const [file, change] of [...changes].sort(([a], [b]) => a.localeCompare(b))) {
+			touched.paths.push(file);
 			if (change === 'deleted') {
 				counts.deleted++;
 				lines.push(`${file}  deleted`);
 				continue;
 			}
 			counts[change === 'new' ? 'new' : 'changed']++;
+			const src = read(file);
+			touched.text += (change === 'new' ? src : change.map(([a, b]) => src.split('\n').slice(a - 1, b).join('\n')).join('\n')) + '\n';
 			if (!languageOf(file)) {
 				notCode.push(file);
 				continue;
@@ -393,6 +405,7 @@ export class CodeIntel {
 				// A new file's own uses of its symbols say nothing; what matters is whether other files use them.
 				const elsewhere: string[] = [];
 				let unknown = false;
+				touched.symbols.push(...syms.map(s => s.qualified));
 				for (const sym of syms.slice(0, 30)) {
 					const used = await usesOf(sym);
 					if (used instanceof Error) unknown = true;
@@ -406,6 +419,7 @@ export class CodeIntel {
 			lines.push(`${file}  lines ${change.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(', ')}`);
 			const hit = syms.filter(s => change.some(([a, b]) => s.line <= b && s.endLine >= a));
 			const leaves = hit.filter(s => !hit.some(o => o !== s && o.qualified.startsWith(s.qualified + '.'))); // the innermost of nested hits
+			touched.symbols.push(...leaves.map(s => s.qualified));
 			if (!leaves.length) {
 				lines.push('  (no symbol touched: imports, comments or top-level statements)');
 				continue;
@@ -416,6 +430,8 @@ export class CodeIntel {
 		const head = `${plural(changes.size, 'file')} differ from HEAD: ${counts.changed} changed, ${counts.new} new, ${counts.deleted} deleted`;
 		if (notCode.length) lines.push('', `Not code: ${notCode.join(', ')}`);
 		if (dependents.size) lines.push('', `Use the changed symbols but are not changed themselves: ${[...dependents].sort().join(', ')}`);
+		const across = crossRepo(this.root, touched);
+		if (across.length) lines.push('', ...across);
 		return cut([head, '', ...lines]).join('\n');
 	}
 }
@@ -511,7 +527,7 @@ const TOOLS: Record<string, Spec> = {
 		run: async code => overview(code.root),
 	},
 	change_impact: {
-		description: 'What the uncommitted changes touch: each changed symbol and everywhere it is used, and the files that depend on the changes but were not changed. Run it before finishing a change.',
+		description: 'What the uncommitted changes touch: each changed symbol and everywhere it is used, the files that depend on the changes but were not changed, and the contracts other repositories use that the change touches by name (from the canon\'s cross-repo graph). Run it before finishing a change.',
 		shape: {},
 		run: code => code.impact(),
 	},

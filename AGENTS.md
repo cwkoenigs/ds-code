@@ -57,7 +57,8 @@ before finishing a change. `ds` (from `ds-next mcp`) answers from the canon.
 
 - `src/tools.ts`: every tool there is marked read-only, so a client runs it without asking. A tool
   must only read: never write, never run anything the repo carries (its `python`, its git config's
-  textconv), never read outside the repo but a library.
+  textconv), never read outside the repo but a library and the canon's `index.json` (`src/graph.ts`: at
+  `DS_CANON` or beside the team's repos, never at a path the repo names).
 - `package-lock.json`: regenerate with npm, never by hand.
 
 ## Standards

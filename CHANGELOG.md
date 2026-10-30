@@ -9,6 +9,11 @@ started (`cwkoenigs/ds-next#N`).
 ## [Unreleased]
 
 ### Added
+- `change_impact` ends with what other repositories use: the contracts this repo declares under
+  `[provides]` that the change touches by name (a changed file that is a provided path, a changed
+  symbol whose name is a word of a provided entry, or the entry in the changed text), each with the
+  repos and lines that use it, from the `repos` section of the canon's `index.json` (canon adr-002).
+  Without a canon on the machine or a manifest in the repo it says nothing. (#12, local-023)
 - `.ds/manifest.toml` declares what this repo provides to other repositories (`ds-code mcp`,
   `ds-code --version`, and the four tool names that are not plain words) and what it uses (canon's
   `index.json`, `ds-next mcp`, four skills-os skills), for the cross-repo graph canon's pipeline

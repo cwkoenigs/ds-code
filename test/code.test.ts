@@ -1,7 +1,7 @@
 // The code tools against the real language servers ds-code ships: a small TypeScript project, a small
 // Python one, a git repo with uncommitted changes, and this repo itself. And the pieces on their own.
 import {execFileSync} from 'node:child_process';
-import {chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync} from 'node:fs';
+import {rmSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as tick} from 'node:timers/promises';
@@ -314,5 +314,67 @@ describe('the code tools, the pieces', () => {
 		expect(resolveImport('pkg/sub/mod.py', 'pkg.util', files, ['', 'src'])).toBe('pkg/util.py');
 		expect(resolveImport('pkg/sub/mod.py', '..util', files, [])).toBe('pkg/util.py');
 		expect(resolveImport('pkg/sub/mod.py', 'os', files, [''])).toBeUndefined();
+	});
+});
+
+describe('change_impact names the contracts other repositories use (canon adr-002)', () => {
+	const env = {...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example'};
+	const dir = mkdtempSync(join(tmpdir(), 'code-graph-'));
+	cpSync(join(FIXTURES, 'code-ts'), dir, {recursive: true});
+	mkdirSync(join(dir, '.ds'));
+	writeFileSync(join(dir, '.ds', 'manifest.toml'), '[repo]\nname = "demo"\ntags = ["typescript"]\n\n[provides]\ncommands = ["demo greet [--loud]"]\npaths = ["src/extra.ts", "docs/*.md"]\n');
+	const git = (...args: string[]) => execFileSync('git', args, {cwd: dir, env, stdio: 'pipe'});
+	git('init', '-q');
+	git('add', '-A');
+	git('commit', '-q', '-m', 'base');
+	const canon = mkdtempSync(join(tmpdir(), 'code-canon-'));
+	const provides = {commands: ['demo greet [--loud]'], paths: ['src/extra.ts', 'docs/*.md']};
+	const section = {
+		generated: '2026-10-30',
+		repos: [{name: 'demo', provides}, {name: 'other'}],
+		edges: [{from: 'other', to: 'demo', what: 'demo greet [--loud]', declared: true, mentioned: true, count: 4, where: ['run.sh:1', 'README.md:3', 'a.md:1', 'b.md:1']}],
+	};
+	writeFileSync(join(canon, 'index.json'), JSON.stringify({standards: [], repos: section}));
+	const run = open(dir);
+	const withCanon = async (root: string, f: () => Promise<void>) => {
+		const before = process.env.DS_CANON;
+		process.env.DS_CANON = root;
+		try {
+			await f();
+		} finally {
+			if (before === undefined) delete process.env.DS_CANON;
+			else process.env.DS_CANON = before;
+		}
+	};
+
+	it('by a changed symbol and a provided path, with who uses each; a glob nothing matches stays out', async () => {
+		const greet = join(dir, 'src', 'greet.ts');
+		writeFileSync(greet, readFileSync(greet, 'utf8').replace('return `hello ${name}`;', 'return `hi ${name}`;'));
+		writeFileSync(join(dir, 'src', 'extra.ts'), 'export const EXTRA = 1;\n');
+		await withCanon(canon, async () => {
+			const report = (await run('change_impact')).text;
+			expect(report).toContain('Across repos (canon graph compiled 2026-10-30): the change touches what other repositories use\n  demo greet [--loud]  used by other (run.sh:1, README.md:3, a.md:1, …)\n  src/extra.ts  used by nobody the graph knows');
+			expect(report).not.toContain('docs/*.md');
+		});
+	});
+
+	it('says when none is touched, when the repo is not registered, and nothing without a canon', async () => {
+		git('checkout', '--', '.');
+		rmSync(join(dir, 'src', 'extra.ts'));
+		writeFileSync(join(dir, 'src', 'zz.ts'), 'export const ZZ = 2;\n');
+		await withCanon(canon, async () => {
+			expect((await run('change_impact')).text).toContain('\nAcross repos: none of the 3 contracts demo provides is touched by name (canon graph compiled 2026-10-30)');
+		});
+		writeFileSync(join(canon, 'index.json'), JSON.stringify({standards: [], repos: {...section, repos: [{name: 'other'}]}}));
+		await withCanon(canon, async () => {
+			expect((await run('change_impact')).text).toContain("\nAcross repos: demo is not in the canon's registry (canon/repos/demo.toml); the graph does not know it");
+		});
+		writeFileSync(join(canon, 'index.json'), JSON.stringify({standards: []}));      // the pipeline has not run
+		await withCanon(canon, async () => {
+			expect((await run('change_impact')).text).not.toContain('Across repos');
+		});
+		await withCanon(mkdtempSync(join(tmpdir(), 'code-nocanon-')), async () => {    // no canon here at all
+			expect((await run('change_impact')).text).not.toContain('Across repos');
+		});
 	});
 });
