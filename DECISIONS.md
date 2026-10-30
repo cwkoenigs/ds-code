@@ -543,3 +543,39 @@ from its git history. Each is dated when it was made.
   ds-next → ds-code as declared and mentioned for the server and the four tools; `npm run typecheck`
   and `npm test` pass.
 - **Review date:** when step 5 lands, or 2026-11-30 with the ADR.
+
+## local-023: `change_impact` reads the canon's index, and nothing else outside the repo
+
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:** canon adr-002 step 5. The canon's pipeline compiles who uses what each repo provides
+  into the `repos` section of its `index.json` (canon #10); ds-next reads it (ds-next #19). The
+  tool that should say it is `change_impact`, which already lists what a change touches inside the
+  repo. Two rules of this repo stood in the way: nothing outside the repo is read but a library, and
+  nothing a repo points the tools at is followed.
+- **Options considered:**
+  1. **Leave cross-repo to ds-next's `repo_graph`:** the agent would have to think of asking; the
+     point of `change_impact` is that it does not.
+  2. **Follow the manifest's `canon = ...` path to the index:** a repo would then choose a file for a
+     read-only tool to read and parse; the test suite's whole third section exists to forbid that.
+  3. **Read the index at a fixed place only:** chosen. `DS_CANON`, else `canon/index.json` beside the
+     team's repos (`~/Developer`, `~/code`, `~/.ds`, the same bases ds-next searches). The repo's
+     manifest is read for its `[repo] name` alone. No canon there, or no manifest, and the tool says
+     nothing, as before.
+  4. **What counts as touched:** every provided contract on every change is noise; matching only the
+     changed text misses a function whose name is not how others invoke it. Chosen: a changed file
+     that is a provided path (glob, one segment per `*`), a changed symbol whose last name part is a
+     word of a provided entry (`setup` in `ds-next setup`, `change_impact` in the tools table), or
+     the entry's scan literal in the changed text. The literal rule repeats canon's `build_repos.py`
+     in one line so both sides agree.
+- **Decision:** `src/graph.ts` (`canonGraph`, `repoName`, `literal`, `crossRepo`); `impact()`
+  collects the changed paths, symbols and text and appends the `Across repos` lines; the rule in
+  ARCHITECTURE.md and AGENTS.md names the one exception.
+- **Consequences:** an agent finishing a change in a registered repo sees which other repos run,
+  read or share what it changed, with file and line, without asking. The index is as fresh as the
+  canon clone on the machine, which ds-next's `mcp` now fast-forwards. A repo that declares nothing
+  is told so once per run; one the registry does not know is told that.
+- **Validation:** `test/code.test.ts`: a changed symbol and a provided path each matched with their
+  users, a glob nothing matches left out; none touched; repo not registered; no section; no canon.
+  `npm run typecheck` and `npm test` pass.
+- **Review date:** 2026-11-30, with the ADR.

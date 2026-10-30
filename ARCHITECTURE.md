@@ -33,9 +33,10 @@ flowchart TD
   asking. A tool that writes does not belong here.
 - **Nothing the repo carries runs.** Pyright is given a `.venv`'s package folders, never its `python`,
   which Pyright would run; `git diff` runs with no external diff and no textconv.
-- **Nothing outside the repo is read but a library.** A file reached through a link out of the repo
-  is outside it (`repo.realWithin`), and so is a caller in a file a `tsconfig.json` brings in from
-  outside: it is counted, never named.
+- **Nothing outside the repo is read but a library, and the canon's index.** A file reached through a
+  link out of the repo is outside it (`repo.realWithin`), and so is a caller in a file a `tsconfig.json`
+  brings in from outside: it is counted, never named. The one other read is the canon's `index.json`
+  (`src/graph.ts`), at `DS_CANON` or beside the team's repos, never at a path the repo names.
 - **Nothing is installed on the machine beyond `npm install`, and nothing leaves it.** Both servers
   come from ds-code's own `node_modules`; neither makes a network request.
 - **Missing pieces never crash.** A server that stops is started again on the next call; one that
@@ -50,6 +51,7 @@ flowchart TD
 | `src/tools.ts` | The eight tools (`find_symbol`, `references`, `callers`, `callees`, `file_symbols`, `definition`, `repo_overview`, `change_impact`) and `CodeIntel`, which asks the servers and shapes the answers |
 | `src/lsp.ts` | `LanguageServer`: a small LSP client over stdio (Content-Length framing, requests, the client's answers to the server), `openFile`, and `diagnosed` for when a file's diagnostics arrive |
 | `src/servers.ts` | Which server reads which file, and how to start each from ds-code's `node_modules`: TypeScript 7's `tsc --lsp`, Pyright's `pyright-langserver`; the project's `.venv` package folders for Pyright (`packagesIn`), never its python |
+| `src/graph.ts` | The cross-repo graph (canon adr-002): the `repos` section of the canon's `index.json`, the repo's name from its manifest, and the `Across repos` lines `change_impact` adds: the contracts this repo provides that a change touches by name, and who uses each |
 | `src/repo.ts` | What needs no server: the repo's files (`git ls-files`), the files that mention a name (`mentioning`, `git grep`), its import graph and entry points for `repo_overview`, the lines `git diff` says changed for `change_impact`, and `within` and `isFile` for paths |
 | `test/code.test.ts` | The tools against the real servers: the two fixture projects, a file no tsconfig includes, a git repo with changes, this repo (its tests included); the MCP server; the safety rules above; imports and resolution |
 | `test/architecture.test.ts` | That this page names every file, and names no file that is gone |
@@ -64,6 +66,7 @@ flowchart TD
 | A language the tools read | `EXTENSIONS` and `serverSpec` in `src/servers.ts`, with a server that speaks LSP over stdio and installs from npm |
 | What the MCP server says about its tools | `src/mcp.ts` |
 | The command | `src/cli.ts` and its `HELP` text |
+| What `change_impact` says about other repositories | `crossRepo` in `src/graph.ts`; the data comes from canon's `scripts/build_repos.py` |
 
 ## The servers
 

@@ -54,7 +54,7 @@ claude mcp add code -- ds-code mcp         # Claude Code, everywhere
 | `references` | Every use of a symbol, with the line of code |
 | `callers` | Who calls a function, and who calls them, to a depth |
 | `callees` | What a function calls, in the repo and outside it |
-| `change_impact` | The uncommitted changes, symbol by symbol, and the files that depend on them without being changed |
+| `change_impact` | The uncommitted changes, symbol by symbol, the files that depend on them without being changed, and the contracts other repositories use that the change touches by name (from the canon's cross-repo graph) |
 
 Every tool only reads, and says so, so no agent asks before running one. A server starts on the first
 call that needs it (under a second here, a few seconds on a large repo) and stops when the agent
